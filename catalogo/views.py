@@ -1,9 +1,10 @@
 from rest_framework import viewsets, permissions, status
-from .models import Mezcal, Resena, Calificacion, Carrito, CarritoItem, Orden, OrdenItem
+from .models import Mezcal, Resena, Calificacion, Carrito, CarritoItem, Orden, OrdenItem, Usuario
 from .serializers import (
     MezcalSerializer, ResenaSerializer, CalificacionSerializer,
     CarritoSerializer, CarritoItemSerializer, OrdenSerializer,
 )
+from .serializers import UsuarioSerializer
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db import transaction
@@ -120,3 +121,17 @@ class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
 class RegistroView(CreateAPIView):
     serializer_class = RegistroSerializer
     permission_classes = [permissions.AllowAny]
+
+class EsAdministrador(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return bool(
+            request.user and
+            request.user.is_authenticated and
+            request.user.rol == 'administrador'
+        )
+
+
+class UsuarioViewSet(viewsets.ModelViewSet):
+    queryset = Usuario.objects.all()
+    serializer_class = UsuarioSerializer
+    permission_classes = [EsAdministrador]

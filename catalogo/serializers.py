@@ -36,6 +36,14 @@ class ResenaSerializer(serializers.ModelSerializer):
         fields = ['id', 'usuario', 'mezcal', 'comentario', 'creado_en']
         read_only_fields = ['id', 'usuario', 'creado_en']
 
+    def validate(self, data):
+        usuario = self.context['request'].user
+        mezcal = data.get('mezcal')
+        if Resena.objects.filter(usuario=usuario, mezcal=mezcal).exists():
+            raise serializers.ValidationError("Ya has dejado una reseña para este mezcal.")
+        return data
+
+
 class CalificacionSerializer(serializers.ModelSerializer):
     usuario = serializers.ReadOnlyField(source='usuario.username')
 
@@ -44,11 +52,18 @@ class CalificacionSerializer(serializers.ModelSerializer):
         fields = ['id', 'usuario', 'mezcal', 'valor', 'creado_en']
         read_only_fields = ['id', 'usuario', 'creado_en']
 
+    def validate(self, data):
+        usuario = self.context['request'].user
+        mezcal = data.get('mezcal')
+        if Calificacion.objects.filter(usuario=usuario, mezcal=mezcal).exists():
+            raise serializers.ValidationError("Ya has calificado este mezcal.")
+        return data
+
     def validate_valor(self, value):
         if value < 1 or value > 5:
             raise serializers.ValidationError("La calificación debe estar entre 1 y 5.")
         return value
-    
+
 class CarritoItemSerializer(serializers.ModelSerializer):
     mezcal_nombre = serializers.ReadOnlyField(source='mezcal.nombre')
     subtotal = serializers.SerializerMethodField()
@@ -73,7 +88,7 @@ class CarritoSerializer(serializers.ModelSerializer):
 
     def get_total(self, obj):
         return sum(item.cantidad * item.mezcal.precio for item in obj.items.all())
-    
+
 class OrdenItemSerializer(serializers.ModelSerializer):
     mezcal_nombre = serializers.ReadOnlyField(source='mezcal.nombre')
 
@@ -91,3 +106,8 @@ class OrdenSerializer(serializers.ModelSerializer):
         model = Orden
         fields = ['id', 'usuario', 'total', 'estado', 'items', 'creado_en']
         read_only_fields = ['id', 'usuario', 'total', 'estado', 'items', 'creado_en']
+
+class UsuarioSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Usuario
+        fields = ['id', 'username', 'email', 'rol', 'is_active', 'date_joined']
