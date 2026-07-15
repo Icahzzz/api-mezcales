@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Mezcal, Resena, Calificacion, Carrito, CarritoItem, Orden, OrdenItem
+from .models import Categoria, Mezcal, Promocion, Resena, Calificacion, Carrito, CarritoItem, Orden, OrdenItem
 from django.contrib.auth.password_validation import validate_password
 from .models import Usuario
 
@@ -19,14 +19,42 @@ class RegistroSerializer(serializers.ModelSerializer):
         )
         return usuario
 
+
+class CategoriaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Categoria
+        fields = ['id', 'nombre', 'descripcion', 'activo']
+        read_only_fields = ['id']
+
 class MezcalSerializer(serializers.ModelSerializer):
+    categoria_nombre = serializers.ReadOnlyField(source='categoria.nombre')
+
     class Meta:
         model = Mezcal
         fields = [
-            'id', 'nombre', 'descripcion', 'tipo', 'region',
+            'id', 'nombre', 'descripcion', 'categoria', 'categoria_nombre', 'tipo', 'region',
             'precio', 'stock', 'imagen', 'activo', 'creado_en',
         ]
         read_only_fields = ['id', 'creado_en']
+
+
+class PromocionSerializer(serializers.ModelSerializer):
+    mezcal_nombre = serializers.ReadOnlyField(source='mezcal.nombre')
+
+    class Meta:
+        model = Promocion
+        fields = [
+            'id', 'nombre', 'descripcion', 'tipo_descuento', 'valor_descuento',
+            'fecha_inicio', 'fecha_fin', 'activo', 'mezcal', 'mezcal_nombre',
+        ]
+        read_only_fields = ['id']
+
+    def validate(self, data):
+        inicio = data.get('fecha_inicio') or getattr(self.instance, 'fecha_inicio', None)
+        fin = data.get('fecha_fin') or getattr(self.instance, 'fecha_fin', None)
+        if inicio and fin and fin < inicio:
+            raise serializers.ValidationError("La fecha fin no puede ser menor que la fecha inicio.")
+        return data
 
 class ResenaSerializer(serializers.ModelSerializer):
     usuario = serializers.ReadOnlyField(source='usuario.username')

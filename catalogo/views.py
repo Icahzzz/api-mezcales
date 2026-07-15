@@ -1,21 +1,35 @@
 from rest_framework import viewsets, permissions, status
-from .models import Mezcal, Resena, Calificacion, Carrito, CarritoItem, Orden, OrdenItem, Usuario
+from .models import Categoria, Mezcal, Promocion, Resena, Calificacion, Carrito, CarritoItem, Orden, OrdenItem, Usuario
 from .serializers import (
-    MezcalSerializer, ResenaSerializer, CalificacionSerializer,
+    CategoriaSerializer, MezcalSerializer, PromocionSerializer, ResenaSerializer, CalificacionSerializer,
     CarritoSerializer, CarritoItemSerializer, OrdenSerializer,
 )
 from .serializers import UsuarioSerializer
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from django.db import transaction
+from django.db.models import Sum, Count
 from .serializers import RegistroSerializer
 from rest_framework.generics import CreateAPIView
 from .permissions import EsAdministradorOSoloLectura, EsPropietarioOAdministrador
+from django.views.generic import TemplateView
 
 
 class MezcalViewSet(viewsets.ModelViewSet):
     queryset = Mezcal.objects.all()
     serializer_class = MezcalSerializer
+    permission_classes = [EsAdministradorOSoloLectura]
+
+
+class CategoriaViewSet(viewsets.ModelViewSet):
+    queryset = Categoria.objects.all().order_by('nombre')
+    serializer_class = CategoriaSerializer
+    permission_classes = [EsAdministradorOSoloLectura]
+
+
+class PromocionViewSet(viewsets.ModelViewSet):
+    queryset = Promocion.objects.select_related('mezcal').all().order_by('-fecha_inicio')
+    serializer_class = PromocionSerializer
     permission_classes = [EsAdministradorOSoloLectura]
 
 class ResenaViewSet(viewsets.ModelViewSet):
@@ -79,7 +93,23 @@ class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return Orden.objects.filter(usuario=self.request.user)
+        user = self.request.user
+        if hasattr(user, 'rol') and user.rol == 'administrador':
+            return Orden.objects.all().select_related('usuario').order_by('-creado_en')
+        return Orden.objects.filter(usuario=user)
+
+    def partial_update(self, request, *args, **kwargs):
+        """Permite al administrador cambiar el estado de una orden."""
+        user = request.user
+        if not (hasattr(user, 'rol') and user.rol == 'administrador'):
+            return Response({'detail': 'No autorizado.'}, status=status.HTTP_403_FORBIDDEN)
+        instance = self.get_object()
+        estado = request.data.get('estado')
+        if estado not in [c[0] for c in Orden.Estado.choices]:
+            return Response({'estado': ['Valor no válido.']}, status=status.HTTP_400_BAD_REQUEST)
+        instance.estado = estado
+        instance.save()
+        return Response(OrdenSerializer(instance).data)
 
     @action(detail=False, methods=['post'])
     def pagar(self, request):
@@ -135,3 +165,65 @@ class UsuarioViewSet(viewsets.ModelViewSet):
     queryset = Usuario.objects.all()
     serializer_class = UsuarioSerializer
     permission_classes = [EsAdministrador]
+
+    def create(self, request, *args, **kwargs):
+        data = request.data
+        password = str(data.get('password', '')).strip()
+        if not password:
+            return Response({'password': ['La contraseña es requerida.']}, status=status.HTTP_400_BAD_REQUEST)
+        u = Usuario(
+            username=data.get('username', ''),
+            email=data.get('email', ''),
+            rol=data.get('rol', 'usuario'),
+            is_active=str(data.get('is_active', 'true')).lower() in ('true', '1'),
+        )
+        u.set_password(password)
+        u.save()
+        return Response(UsuarioSerializer(u).data, status=status.HTTP_201_CREATED)
+
+
+class ReporteVentasViewSet(viewsets.ViewSet):
+    permission_classes = [EsAdministrador]
+
+    def list(self, request):
+        ordenes_pagadas = Orden.objects.filter(estado=Orden.Estado.PAGADO)
+        total_ventas = ordenes_pagadas.aggregate(total=Sum('total'))['total'] or 0
+        total_ordenes = ordenes_pagadas.count()
+        ticket_promedio = (total_ventas / total_ordenes) if total_ordenes else 0
+
+        top_articulos = (
+            OrdenItem.objects
+            .filter(orden__estado=Orden.Estado.PAGADO)
+            .values('mezcal__nombre')
+            .annotate(cantidad_vendida=Sum('cantidad'))
+            .order_by('-cantidad_vendida')[:10]
+        )
+
+        ventas_por_usuario = (
+            Orden.objects
+            .filter(estado=Orden.Estado.PAGADO)
+            .values('usuario__username')
+            .annotate(total_compras=Count('id'), total_gastado=Sum('total'))
+            .order_by('-total_gastado')[:10]
+        )
+
+        return Response({
+            'kpis': {
+                'total_ventas': total_ventas,
+                'total_ordenes': total_ordenes,
+                'ticket_promedio': ticket_promedio,
+            },
+            'top_articulos': list(top_articulos),
+            'ventas_por_usuario': list(ventas_por_usuario),
+        })
+
+
+class AdminPOSView(TemplateView):
+    template_name = 'catalogo/admin_pos/index.html'
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def me_view(request):
+    """Devuelve el perfil del usuario autenticado (para verificar rol en el frontend)."""
+    return Response(UsuarioSerializer(request.user).data)

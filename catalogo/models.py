@@ -16,6 +16,19 @@ class Usuario(AbstractUser):
 
     def __str__(self):
         return f"{self.username} ({self.rol})"
+
+
+class Categoria(models.Model):
+    nombre = models.CharField(max_length=80, unique=True)
+    descripcion = models.TextField(blank=True)
+    activo = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "Categoria"
+        verbose_name_plural = "Categorias"
+
+    def __str__(self):
+        return self.nombre
     
 class Mezcal(models.Model):
     class Tipo(models.TextChoices):
@@ -26,6 +39,7 @@ class Mezcal(models.Model):
 
     nombre = models.CharField(max_length=100)
     descripcion = models.TextField(blank=True)
+    categoria = models.ForeignKey(Categoria, on_delete=models.SET_NULL, null=True, blank=True, related_name='mezcales')
     tipo = models.CharField(max_length=20, choices=Tipo.choices, default=Tipo.JOVEN)
     region = models.CharField(max_length=100, blank=True)
     precio = models.DecimalField(max_digits=8, decimal_places=2)
@@ -40,6 +54,28 @@ class Mezcal(models.Model):
 
     def __str__(self):
         return f"{self.nombre} ({self.tipo})"
+
+
+class Promocion(models.Model):
+    class TipoDescuento(models.TextChoices):
+        PORCENTAJE = 'porcentaje', 'Porcentaje'
+        MONTO_FIJO = 'monto_fijo', 'Monto fijo'
+
+    nombre = models.CharField(max_length=100)
+    descripcion = models.TextField(blank=True)
+    tipo_descuento = models.CharField(max_length=20, choices=TipoDescuento.choices, default=TipoDescuento.PORCENTAJE)
+    valor_descuento = models.DecimalField(max_digits=8, decimal_places=2)
+    fecha_inicio = models.DateField()
+    fecha_fin = models.DateField()
+    activo = models.BooleanField(default=True)
+    mezcal = models.ForeignKey(Mezcal, on_delete=models.CASCADE, related_name='promociones', null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Promocion"
+        verbose_name_plural = "Promociones"
+
+    def __str__(self):
+        return self.nombre
     
 class Resena(models.Model):
     usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='resenas')
