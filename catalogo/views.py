@@ -8,7 +8,7 @@ from .serializers import UsuarioSerializer
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from django.db import transaction
-from django.db.models import Sum, Count
+from django.db.models import Sum, Count, Avg
 from .serializers import RegistroSerializer
 from rest_framework.generics import CreateAPIView
 from .permissions import EsAdministradorOSoloLectura, EsPropietarioOAdministrador
@@ -206,7 +206,13 @@ class ReporteVentasViewSet(viewsets.ViewSet):
             .annotate(total_compras=Count('id'), total_gastado=Sum('total'))
             .order_by('-total_gastado')[:10]
         )
-
+        productos_valorados = (
+            Mezcal.objects
+            .annotate(promedio=Avg('calificaciones__valor'), num_calificaciones=Count('calificaciones'))
+            .filter(num_calificaciones__gt=0)
+            .order_by('-promedio')[:10]
+            .values('nombre', 'promedio', 'num_calificaciones')
+        )
         return Response({
             'kpis': {
                 'total_ventas': total_ventas,
@@ -215,6 +221,7 @@ class ReporteVentasViewSet(viewsets.ViewSet):
             },
             'top_articulos': list(top_articulos),
             'ventas_por_usuario': list(ventas_por_usuario),
+            'productos_valorados': list(productos_valorados),
         })
 
 

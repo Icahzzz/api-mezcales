@@ -58,12 +58,12 @@ class PromocionSerializer(serializers.ModelSerializer):
 
 class ResenaSerializer(serializers.ModelSerializer):
     usuario = serializers.ReadOnlyField(source='usuario.username')
+    mezcal_nombre = serializers.ReadOnlyField(source='mezcal.nombre')
 
     class Meta:
         model = Resena
-        fields = ['id', 'usuario', 'mezcal', 'comentario', 'creado_en']
+        fields = ['id', 'usuario', 'mezcal', 'mezcal_nombre', 'comentario', 'creado_en']
         read_only_fields = ['id', 'usuario', 'creado_en']
-
     def validate(self, data):
         usuario = self.context['request'].user
         mezcal = data.get('mezcal')

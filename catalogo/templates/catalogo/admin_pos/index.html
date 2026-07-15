@@ -359,13 +359,14 @@
   </div>
 </div>
       <div class="menu">
-        <button data-view="reporte" class="active">Reporte de ventas</button>
-        <button data-view="catalogos">Catalogos</button>
-        <button data-view="articulos">Articulos</button>
-        <button data-view="promociones">Promociones</button>
-        <button data-view="usuarios">Usuarios</button>
-        <button data-view="compras">Compras</button>
-      </div>
+  <button data-view="reporte" class="active">Reporte de ventas</button>
+  <button data-view="catalogos">Catalogos</button>
+  <button data-view="articulos">Articulos</button>
+  <button data-view="promociones">Promociones</button>
+  <button data-view="usuarios">Usuarios</button>
+  <button data-view="compras">Compras</button>
+  <button data-view="resenas">Reseñas</button>
+</div>
       <hr style="margin:14px 0; border:none; border-top:1px solid var(--line)">
       <button id="logoutBtn" class="btn danger" style="width:100%">Cerrar sesión</button>
     </aside>
@@ -381,6 +382,7 @@
       <section id="view-promociones" class="grid hidden"></section>
       <section id="view-usuarios" class="grid hidden"></section>
       <section id="view-compras" class="grid hidden"></section>
+      <section id="view-resenas" class="grid hidden"></section>
     </main>
   </div>
 
@@ -400,7 +402,8 @@ const API = {
   categorias: '/api/categorias/',
   mezcales: '/api/mezcales/',
   promociones: '/api/promociones/',
-  usuarios: '/api/usuarios/'
+  usuarios: '/api/usuarios/',
+  resenas: '/api/resenas/'
 };
 
 function money(n) {
@@ -458,7 +461,7 @@ function logout() {
 
 function showView(name) {
   document.querySelectorAll('.menu button[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === name));
-  ['reporte','catalogos','articulos','promociones','usuarios','compras'].forEach(v => {
+  ['reporte','catalogos','articulos','promociones','usuarios','compras','resenas'].forEach(v => {
     document.getElementById(`view-${v}`).classList.toggle('hidden', v !== name);
   });
   const titles = {
@@ -467,7 +470,8 @@ function showView(name) {
     articulos: 'Articulos',
     promociones: 'Promociones',
     usuarios: 'Usuarios',
-    compras: 'Compras'
+    compras: 'Compras',
+    resenas: 'Reseñas'
   };
   document.getElementById('viewTitle').textContent = titles[name];
 }
@@ -481,44 +485,67 @@ async function loadReporte() {
     <article class="card span-4 kpi"><h3>Ticket promedio</h3><p>${money(data.kpis.ticket_promedio)}</p></article>
     <article class="card span-6">
       <h3>Productos mas vendidos</h3>
-      ${data.top_articulos.length ? '<canvas id="chartProductos" style="max-height:260px"></canvas>' : '<div class="ia-placeholder"><p>Sin ventas registradas.</p></div>'}
+      <canvas id="chartProductos" style="max-height:260px"></canvas>
     </article>
     <article class="card span-6">
       <h3>Clientes que mas compran</h3>
-      ${data.ventas_por_usuario.length ? '<canvas id="chartClientes" style="max-height:260px"></canvas>' : '<div class="ia-placeholder"><p>Sin ventas registradas.</p></div>'}
+      <canvas id="chartClientes" style="max-height:260px"></canvas>
+    </article>
+    <article class="card span-12">
+      <h3>Productos mejor valorados</h3>
+      <canvas id="chartValorados" style="max-height:260px"></canvas>
     </article>
   `;
   const PALETTE = ['#5d3f2b','#8a6441','#c2995b','#d4b896','#e8d5b8','#3b271b','#9b7a54','#b89170'];
-  if (data.top_articulos.length) {
-    new Chart(document.getElementById('chartProductos'), {
-      type: 'bar',
-      data: {
-        labels: data.top_articulos.map(x => x.mezcal__nombre || 'Sin nombre'),
-        datasets: [{ label: 'Unidades vendidas', data: data.top_articulos.map(x => x.cantidad_vendida),
-          backgroundColor: PALETTE, borderRadius: 5, borderSkipped: false }]
-      },
-      options: { indexAxis: 'y', responsive: true,
-        plugins: { legend: { display: false } },
-        scales: { x: { beginAtZero: true, grid: { color: '#ede0cc' } }, y: { grid: { display: false } } }
+
+  new Chart(document.getElementById('chartProductos'), {
+    type: 'bar',
+    data: {
+      labels: data.top_articulos.length ? data.top_articulos.map(x => x.mezcal__nombre || 'Sin nombre') : ['Sin datos'],
+      datasets: [{ label: 'Unidades vendidas',
+        data: data.top_articulos.length ? data.top_articulos.map(x => x.cantidad_vendida) : [0],
+        backgroundColor: PALETTE, borderRadius: 5, borderSkipped: false }]
+    },
+    options: { indexAxis: 'y', responsive: true,
+      plugins: { legend: { display: false } },
+      scales: { x: { beginAtZero: true, grid: { color: '#ede0cc' } }, y: { grid: { display: false } } }
+    }
+  });
+
+  new Chart(document.getElementById('chartClientes'), {
+    type: 'doughnut',
+    data: {
+      labels: data.ventas_por_usuario.length ? data.ventas_por_usuario.map(x => x.usuario__username) : ['Sin datos'],
+      datasets: [{ data: data.ventas_por_usuario.length ? data.ventas_por_usuario.map(x => Number(x.total_gastado)) : [1],
+        backgroundColor: data.ventas_por_usuario.length ? PALETTE : ['#d8c7b2'], borderWidth: 2, borderColor: '#f7f2e7' }]
+    },
+    options: { responsive: true,
+      plugins: {
+        legend: { position: 'right', labels: { font: { family: 'Georgia, serif', size: 12 }, color: '#3b271b', padding: 14 } },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${money(ctx.raw)}` } }
       }
-    });
-  }
-  if (data.ventas_por_usuario.length) {
-    new Chart(document.getElementById('chartClientes'), {
-      type: 'doughnut',
-      data: {
-        labels: data.ventas_por_usuario.map(x => x.usuario__username),
-        datasets: [{ data: data.ventas_por_usuario.map(x => Number(x.total_gastado)),
-          backgroundColor: PALETTE, borderWidth: 2, borderColor: '#f7f2e7' }]
+    }
+  });
+
+  const valorados = data.productos_valorados || [];
+  new Chart(document.getElementById('chartValorados'), {
+    type: 'bar',
+    data: {
+      labels: valorados.length ? valorados.map(x => x.nombre) : ['Sin datos'],
+      datasets: [{ label: 'Calificacion promedio',
+        data: valorados.length ? valorados.map(x => Number(x.promedio).toFixed(2)) : [0],
+        backgroundColor: PALETTE, borderRadius: 5, borderSkipped: false }]
+    },
+    options: { responsive: true,
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: ctx => {
+          const item = valorados[ctx.dataIndex];
+          return item ? ` ${ctx.raw} / 5 (${item.num_calificaciones} reseñas)` : 'Sin datos';
+        }}}
       },
-      options: { responsive: true,
-        plugins: {
-          legend: { position: 'right', labels: { font: { family: 'Georgia, serif', size: 12 }, color: '#3b271b', padding: 14 } },
-          tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${money(ctx.raw)}` } }
-        }
-      }
-    });
-  }
+      scales: { y: { beginAtZero: true, max: 5, grid: { color: '#ede0cc' } }, x: { grid: { display: false } } }
+    }
+  });
 }
 
 function renderTable(headers, rows) {
@@ -971,12 +998,47 @@ async function loadUsuarios() {
   };
 }
 
+async function loadResenas() {
+  state.resenas = await api(API.resenas);
+  const target = document.getElementById('view-resenas');
+  target.innerHTML = `
+    <article class="card span-12">
+      <h3>Reseñas de clientes</h3>
+      <div id="st-resenas-wrap"></div>
+    </article>
+  `;
+  _SR['st-resenas'] = () => {
+    const f = ST.filter('st-resenas', state.resenas, ['usuario','mezcal_nombre','comentario'], []);
+    const pg = ST.page('st-resenas', f);
+    document.getElementById('st-resenas-wrap').innerHTML = ST.wrap('st-resenas', pg,
+      ['ID','Usuario','Articulo','Comentario','Fecha','Acciones'],
+      pg.rows.map(r => [
+        r.id, r.usuario, r.mezcal_nombre || '—', r.comentario,
+        new Date(r.creado_en).toLocaleDateString('es-MX'),
+        `<button class="btn danger resena-del" data-id="${r.id}" style="padding:3px 10px;font-size:11px">&#10005; Borrar</button>`
+      ])
+    );
+  };
+  _SR['st-resenas']();
+}
+
 async function bootstrapApp() {
   document.getElementById('login').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
-  await Promise.all([loadReporte(), loadCatalogos(), loadArticulos(), loadPromociones(), loadUsuarios()]);
+  await Promise.all([loadReporte(), loadCatalogos(), loadArticulos(), loadPromociones(), loadUsuarios(), loadResenas()]);
   loadCompras();
 }
+
+document.addEventListener('click', async e => {
+  if (!e.target.classList.contains('resena-del')) return;
+  const id = e.target.dataset.id;
+  if (!confirm('¿Eliminar esta reseña? Esta acción no se puede deshacer.')) return;
+  try {
+    await api(`${API.resenas}${id}/`, { method: 'DELETE' });
+    state.resenas = state.resenas.filter(r => String(r.id) !== id);
+    _SR['st-resenas']?.();
+  } catch (err) { alert('Error: ' + err.message); }
+});
 
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
