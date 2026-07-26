@@ -1,38 +1,76 @@
-from rest_framework import viewsets, permissions, status
-from .models import Categoria, Mezcal, Promocion, Resena, Calificacion, Carrito, CarritoItem, Orden, OrdenItem, Usuario
-from .serializers import (
-    CategoriaSerializer, MezcalSerializer, PromocionSerializer, ResenaSerializer, CalificacionSerializer,
-    CarritoSerializer, CarritoItemSerializer, OrdenSerializer,
-)
-from .serializers import UsuarioSerializer
-from rest_framework.decorators import action, api_view, permission_classes
+from .models import Mezcal, Orden, OrdenItem, Usuario, ConversacionIA
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.db import transaction
 from django.db.models import Sum, Count, Avg
-from .serializers import RegistroSerializer
-from rest_framework.generics import CreateAPIView
-from .permissions import EsAdministradorOSoloLectura, EsPropietarioOAdministrador
 from django.views.generic import TemplateView
 
+from rest_framework import permissions, status, viewsets
+from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.generics import CreateAPIView
+from rest_framework.response import Response
+
+from .models import (Usuario,Categoria,Mezcal,Promocion,Resena,Calificacion,Carrito,CarritoItem,Orden,OrdenItem)
+
+from .permissions import (EsAdministradorOSoloLectura,EsPropietarioOAdministrador
+)
+
+from .serializers import (
+    RegistroSerializer,
+    UsuarioSerializer,
+    CategoriaSerializer,
+    MezcalSerializer,
+    PromocionSerializer,
+    ResenaSerializer,
+    CalificacionSerializer,
+    CarritoSerializer,
+    OrdenSerializer
+)
+
+
+# =====================================================
+# MEZCALES
+# =====================================================
 
 class MezcalViewSet(viewsets.ModelViewSet):
+
     queryset = Mezcal.objects.all()
     serializer_class = MezcalSerializer
     permission_classes = [EsAdministradorOSoloLectura]
 
 
+# =====================================================
+# CATEGORIAS
+# =====================================================
+
 class CategoriaViewSet(viewsets.ModelViewSet):
-    queryset = Categoria.objects.all().order_by('nombre')
+
+    queryset = Categoria.objects.all().order_by("nombre")
     serializer_class = CategoriaSerializer
     permission_classes = [EsAdministradorOSoloLectura]
 
 
+# =====================================================
+# PROMOCIONES
+# =====================================================
+
 class PromocionViewSet(viewsets.ModelViewSet):
-    queryset = Promocion.objects.select_related('mezcal').all().order_by('-fecha_inicio')
+
+    queryset = Promocion.objects.select_related(
+        "mezcal"
+    ).all().order_by("-fecha_inicio")
+
     serializer_class = PromocionSerializer
     permission_classes = [EsAdministradorOSoloLectura]
 
+
+# =====================================================
+# RESEÑAS
+# =====================================================
+
 class ResenaViewSet(viewsets.ModelViewSet):
+
     queryset = Resena.objects.all()
     serializer_class = ResenaSerializer
     permission_classes = [EsPropietarioOAdministrador]
@@ -40,7 +78,13 @@ class ResenaViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(usuario=self.request.user)
 
+
+# =====================================================
+# CALIFICACIONES
+# =====================================================
+
 class CalificacionViewSet(viewsets.ModelViewSet):
+
     queryset = Calificacion.objects.all()
     serializer_class = CalificacionSerializer
     permission_classes = [EsPropietarioOAdministrador]
@@ -48,189 +92,331 @@ class CalificacionViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(usuario=self.request.user)
 
+
+# =====================================================
+# CARRITO
+# =====================================================
+
 class CarritoViewSet(viewsets.ModelViewSet):
+
     serializer_class = CarritoSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         return Carrito.objects.filter(usuario=self.request.user)
 
-    @action(detail=False, methods=['get'])
+    @action(detail=False, methods=["GET"])
     def mio(self, request):
-        carrito, creado = Carrito.objects.get_or_create(usuario=request.user)
+
+        carrito, creado = Carrito.objects.get_or_create(
+            usuario=request.user
+        )
+
         serializer = self.get_serializer(carrito)
+
         return Response(serializer.data)
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=["POST"])
     def agregar_item(self, request):
-        carrito, creado = Carrito.objects.get_or_create(usuario=request.user)
-        mezcal_id = request.data.get('mezcal')
-        cantidad = int(request.data.get('cantidad', 1))
 
-        item, item_creado = CarritoItem.objects.get_or_create(
-            carrito=carrito, mezcal_id=mezcal_id,
-            defaults={'cantidad': cantidad}
+        carrito, creado = Carrito.objects.get_or_create(
+            usuario=request.user
         )
-        if not item_creado:
+
+        mezcal = request.data.get("mezcal")
+        cantidad = int(request.data.get("cantidad", 1))
+
+        item, creado = CarritoItem.objects.get_or_create(
+            carrito=carrito,
+            mezcal_id=mezcal,
+            defaults={
+                "cantidad": cantidad
+            }
+        )
+
+        if not creado:
             item.cantidad += cantidad
             item.save()
 
         serializer = self.get_serializer(carrito)
+
         return Response(serializer.data)
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=["POST"])
     def quitar_item(self, request):
-        mezcal_id = request.data.get('mezcal')
+
+        mezcal = request.data.get("mezcal")
+
         CarritoItem.objects.filter(
-            carrito__usuario=request.user, mezcal_id=mezcal_id
+            carrito__usuario=request.user,
+            mezcal_id=mezcal
         ).delete()
-        carrito = Carrito.objects.get(usuario=request.user)
+
+        carrito, creado = Carrito.objects.get_or_create(
+            usuario=request.user
+        )
+
         serializer = self.get_serializer(carrito)
+
         return Response(serializer.data)
-    
+
+    @action(detail=False, methods=["POST"])
+    def sincronizar(self, request):
+
+        carrito, creado = Carrito.objects.get_or_create(
+            usuario=request.user
+        )
+
+        carrito.items.all().delete()
+
+        items = request.data.get("items", [])
+
+        for item in items:
+
+            CarritoItem.objects.create(
+                carrito=carrito,
+                mezcal_id=item["mezcal"],
+                cantidad=item["cantidad"]
+            )
+
+        serializer = self.get_serializer(carrito)
+
+        return Response(serializer.data)
+
+
+# =====================================================
+# ORDENES
+# =====================================================
+
 class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
+
     serializer_class = OrdenSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        user = self.request.user
-        if hasattr(user, 'rol') and user.rol == 'administrador':
-            return Orden.objects.all().select_related('usuario').order_by('-creado_en')
-        return Orden.objects.filter(usuario=user)
 
-    def partial_update(self, request, *args, **kwargs):
-        """Permite al administrador cambiar el estado de una orden."""
-        user = request.user
-        if not (hasattr(user, 'rol') and user.rol == 'administrador'):
-            return Response({'detail': 'No autorizado.'}, status=status.HTTP_403_FORBIDDEN)
-        instance = self.get_object()
-        estado = request.data.get('estado')
-        if estado not in [c[0] for c in Orden.Estado.choices]:
-            return Response({'estado': ['Valor no válido.']}, status=status.HTTP_400_BAD_REQUEST)
-        instance.estado = estado
-        instance.save()
-        return Response(OrdenSerializer(instance).data)
+        if self.request.user.rol == "administrador":
+            return Orden.objects.all().order_by("-creado_en")
 
-    @action(detail=False, methods=['post'])
+        return Orden.objects.filter(
+            usuario=self.request.user
+        )
+
+    @action(detail=False, methods=["POST"])
     def pagar(self, request):
-        try:
-            carrito = Carrito.objects.get(usuario=request.user)
-        except Carrito.DoesNotExist:
-            return Response({'error': 'No tienes un carrito.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        items_carrito = carrito.items.all()
-        if not items_carrito:
-            return Response({'error': 'Tu carrito está vacío.'}, status=status.HTTP_400_BAD_REQUEST)
+        carrito, creado = Carrito.objects.get_or_create(
+            usuario=request.user
+        )
 
-        for item in items_carrito:
-            if item.cantidad > item.mezcal.stock:
-                return Response(
-                    {'error': f'Stock insuficiente para {item.mezcal.nombre}.'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+        items = carrito.items.all()
+
+        if not items.exists():
+            return Response(
+                {
+                    "error": "El carrito está vacío."
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         with transaction.atomic():
-            total = sum(item.cantidad * item.mezcal.precio for item in items_carrito)
-            orden = Orden.objects.create(usuario=request.user, total=total, estado=Orden.Estado.PAGADO)
 
-            for item in items_carrito:
+            total = 0
+
+            # 1. Validar stock y calcular total real con descuento
+            for item in items:
+                if item.cantidad > item.mezcal.stock:
+                    return Response(
+                        {
+                            "error": f"Stock insuficiente para {item.mezcal.nombre}"
+                        },
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
+                precio_unitario = item.mezcal.precio_con_descuento()
+                total += item.cantidad * precio_unitario
+
+            # 2. Crear la orden
+            orden = Orden.objects.create(
+                usuario=request.user,
+                total=total,
+                estado=Orden.Estado.PAGADO
+            )
+
+            # 3. Crear los items de la orden y actualizar stock
+            for item in items:
+                precio_unitario = item.mezcal.precio_con_descuento()
+
                 OrdenItem.objects.create(
                     orden=orden,
                     mezcal=item.mezcal,
                     cantidad=item.cantidad,
-                    precio_unitario=item.mezcal.precio,
+                    precio_unitario=precio_unitario
                 )
+
                 item.mezcal.stock -= item.cantidad
                 item.mezcal.save()
 
-            items_carrito.delete()
+            # 4. Vaciar el carrito
+            items.delete()
 
-        serializer = self.get_serializer(orden)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
-    
+        serializer = OrdenSerializer(orden)
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_201_CREATED
+        )
+
+# =====================================================
+# REGISTRO
+# =====================================================
+
 class RegistroView(CreateAPIView):
+
     serializer_class = RegistroSerializer
     permission_classes = [permissions.AllowAny]
 
+
+# =====================================================
+# ADMINISTRADOR
+# =====================================================
+
 class EsAdministrador(permissions.BasePermission):
+
     def has_permission(self, request, view):
-        return bool(
-            request.user and
-            request.user.is_authenticated and
-            request.user.rol == 'administrador'
+
+        return (
+            request.user.is_authenticated
+            and request.user.rol == "administrador"
         )
 
 
 class UsuarioViewSet(viewsets.ModelViewSet):
+
     queryset = Usuario.objects.all()
+
     serializer_class = UsuarioSerializer
+
     permission_classes = [EsAdministrador]
 
-    def create(self, request, *args, **kwargs):
-        data = request.data
-        password = str(data.get('password', '')).strip()
-        if not password:
-            return Response({'password': ['La contraseña es requerida.']}, status=status.HTTP_400_BAD_REQUEST)
-        u = Usuario(
-            username=data.get('username', ''),
-            email=data.get('email', ''),
-            rol=data.get('rol', 'usuario'),
-            is_active=str(data.get('is_active', 'true')).lower() in ('true', '1'),
-        )
-        u.set_password(password)
-        u.save()
-        return Response(UsuarioSerializer(u).data, status=status.HTTP_201_CREATED)
 
+# =====================================================
+# REPORTES
+# =====================================================
 
 class ReporteVentasViewSet(viewsets.ViewSet):
+
     permission_classes = [EsAdministrador]
 
     def list(self, request):
-        ordenes_pagadas = Orden.objects.filter(estado=Orden.Estado.PAGADO)
-        total_ventas = ordenes_pagadas.aggregate(total=Sum('total'))['total'] or 0
-        total_ordenes = ordenes_pagadas.count()
-        ticket_promedio = (total_ventas / total_ordenes) if total_ordenes else 0
 
-        top_articulos = (
+        ordenes = Orden.objects.filter(
+            estado=Orden.Estado.PAGADO
+        )
+
+        total_ventas = (
+            ordenes.aggregate(
+                total=Sum("total")
+            )["total"] or 0
+        )
+
+        total_ordenes = ordenes.count()
+
+        ticket = (
+            total_ventas / total_ordenes
+            if total_ordenes else 0
+        )
+
+        top = (
             OrdenItem.objects
             .filter(orden__estado=Orden.Estado.PAGADO)
-            .values('mezcal__nombre')
-            .annotate(cantidad_vendida=Sum('cantidad'))
-            .order_by('-cantidad_vendida')[:10]
+            .values("mezcal__nombre")
+            .annotate(cantidad=Sum("cantidad"))
+            .order_by("-cantidad")[:10]
         )
 
-        ventas_por_usuario = (
+        usuarios = (
             Orden.objects
             .filter(estado=Orden.Estado.PAGADO)
-            .values('usuario__username')
-            .annotate(total_compras=Count('id'), total_gastado=Sum('total'))
-            .order_by('-total_gastado')[:10]
+            .values("usuario__username")
+            .annotate(
+                compras=Count("id"),
+                gastado=Sum("total")
+            )
+            .order_by("-gastado")
         )
-        productos_valorados = (
+
+        mejores = (
             Mezcal.objects
-            .annotate(promedio=Avg('calificaciones__valor'), num_calificaciones=Count('calificaciones'))
+            .annotate(
+                promedio=Avg("calificaciones__valor"),
+                num_calificaciones=Count("calificaciones")
+            )
             .filter(num_calificaciones__gt=0)
-            .order_by('-promedio')[:10]
-            .values('nombre', 'promedio', 'num_calificaciones')
+            .values(
+                "nombre",
+                "promedio",
+                "num_calificaciones"
+            )
+            .order_by("-promedio")
         )
+
         return Response({
-            'kpis': {
-                'total_ventas': total_ventas,
-                'total_ordenes': total_ordenes,
-                'ticket_promedio': ticket_promedio,
+
+            "kpis":{
+
+                "total_ventas": total_ventas,
+                "total_ordenes": total_ordenes,
+                "ticket_promedio": ticket
+
             },
-            'top_articulos': list(top_articulos),
-            'ventas_por_usuario': list(ventas_por_usuario),
-            'productos_valorados': list(productos_valorados),
+
+            "top_articulos": list(top),
+
+            "ventas_por_usuario": list(usuarios),
+
+            "productos_valorados": list(mejores)
+
         })
 
 
+# =====================================================
+# ADMIN POS
+# =====================================================
+
 class AdminPOSView(TemplateView):
-    template_name = 'catalogo/admin_pos/index.html'
+
+    template_name = "catalogo/admin_pos/index.html"
 
 
-@api_view(['GET'])
+# =====================================================
+# USUARIO ACTUAL
+# =====================================================
+
+@api_view(["GET", "PUT"])
 @permission_classes([permissions.IsAuthenticated])
 def me_view(request):
-    """Devuelve el perfil del usuario autenticado (para verificar rol en el frontend)."""
-    return Response(UsuarioSerializer(request.user).data)
+
+    if request.method == "GET":
+
+        serializer = UsuarioSerializer(request.user)
+
+        return Response(serializer.data)
+
+    serializer = UsuarioSerializer(
+        request.user,
+        data=request.data,
+        partial=True
+    )
+
+    if serializer.is_valid():
+
+        serializer.save()
+
+        return Response(serializer.data)
+
+    return Response(
+        serializer.errors,
+        status=400
+    )
+
