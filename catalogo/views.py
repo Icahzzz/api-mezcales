@@ -183,7 +183,6 @@ class CarritoViewSet(viewsets.ModelViewSet):
 
         return Response(serializer.data)
 
-
 # =====================================================
 # ORDENES
 # =====================================================
@@ -215,10 +214,9 @@ class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
             )
 
         with transaction.atomic():
-            subtotal = 0
             total = 0
 
-            # 1. Validar stock
+            # 1. Validar stock y calcular total real
             for item in items:
                 if item.cantidad > item.mezcal.stock:
                     return Response(
@@ -226,22 +224,14 @@ class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
-                precio_original = item.mezcal.precio
-                precio_con_descuento = item.mezcal.precio_con_descuento()
+                precio_unitario = item.mezcal.precio_con_descuento()
+                total += item.cantidad * precio_unitario
 
-                subtotal += item.cantidad * precio_original
-                total += item.cantidad * precio_con_descuento
-
-            descuento = subtotal - total
-
-            # 2. Crear la orden en estado PENDIENTE
-            # Ajusta los nombres de atributos según tu modelo (subtotal, descuento)
+            # 2. Crear la orden en estado 'pendiente' (segun tu modelo)
             orden = Orden.objects.create(
                 usuario=request.user,
-                subtotal=subtotal,
-                descuento=descuento,
                 total=total,
-                estado=Orden.Estado.PENDIENTE if hasattr(Orden, 'Estado') else "PENDIENTE"
+                estado=Orden.Estado.PENDIENTE # Guarda 'pendiente' en BD
             )
 
             # 3. Crear los items de la orden (sin descontar stock todavía)
@@ -268,13 +258,13 @@ class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
     def cancelar(self, request, pk=None):
         orden = self.get_object()
 
-        if orden.estado != "PENDIENTE":
+        if orden.estado != Orden.Estado.PENDIENTE:
             return Response(
                 {"error": "Solo se pueden cancelar órdenes pendientes."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        orden.estado = "CANCELADO"
+        orden.estado = Orden.Estado.CANCELADO
         orden.save()
 
         serializer = OrdenSerializer(orden)
@@ -284,7 +274,7 @@ class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
     def confirmar_pago(self, request, pk=None):
         orden = self.get_object()
 
-        if orden.estado == "PAGADO":
+        if orden.estado == Orden.Estado.PAGADO:
             return Response(
                 {"mensaje": "La orden ya fue pagada anteriormente."},
                 status=status.HTTP_200_OK
@@ -301,11 +291,12 @@ class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
                 item.mezcal.stock -= item.cantidad
                 item.mezcal.save()
 
-            orden.estado = "PAGADO"
+            orden.estado = Orden.Estado.PAGADO
             orden.save()
 
         serializer = OrdenSerializer(orden)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
 
 # =====================================================
 # REGISTRO
