@@ -189,22 +189,19 @@ class CarritoViewSet(viewsets.ModelViewSet):
 # =====================================================
 
 class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
-
     serializer_class = OrdenSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-
         if self.request.user.rol == "administrador":
             return Orden.objects.all().order_by("-creado_en")
 
         return Orden.objects.filter(
             usuario=self.request.user
-        )
+        ).order_by("-creado_en")
 
     @action(detail=False, methods=["POST"])
     def pagar(self, request):
-
         carrito, creado = Carrito.objects.get_or_create(
             usuario=request.user
         )
@@ -213,37 +210,41 @@ class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
 
         if not items.exists():
             return Response(
-                {
-                    "error": "El carrito está vacío."
-                },
+                {"error": "El carrito está vacío."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         with transaction.atomic():
-
+            subtotal = 0
             total = 0
 
-            # 1. Validar stock y calcular total real con descuento
+            # 1. Validar stock
             for item in items:
                 if item.cantidad > item.mezcal.stock:
                     return Response(
-                        {
-                            "error": f"Stock insuficiente para {item.mezcal.nombre}"
-                        },
+                        {"error": f"Stock insuficiente para {item.mezcal.nombre}"},
                         status=status.HTTP_400_BAD_REQUEST
                     )
-                
-                precio_unitario = item.mezcal.precio_con_descuento()
-                total += item.cantidad * precio_unitario
 
-            # 2. Crear la orden
+                precio_original = item.mezcal.precio
+                precio_con_descuento = item.mezcal.precio_con_descuento()
+
+                subtotal += item.cantidad * precio_original
+                total += item.cantidad * precio_con_descuento
+
+            descuento = subtotal - total
+
+            # 2. Crear la orden en estado PENDIENTE
+            # Ajusta los nombres de atributos según tu modelo (subtotal, descuento)
             orden = Orden.objects.create(
                 usuario=request.user,
+                subtotal=subtotal,
+                descuento=descuento,
                 total=total,
-                estado=Orden.Estado.PAGADO
+                estado=Orden.Estado.PENDIENTE if hasattr(Orden, 'Estado') else "PENDIENTE"
             )
 
-            # 3. Crear los items de la orden y actualizar stock
+            # 3. Crear los items de la orden (sin descontar stock todavía)
             for item in items:
                 precio_unitario = item.mezcal.precio_con_descuento()
 
@@ -254,18 +255,57 @@ class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
                     precio_unitario=precio_unitario
                 )
 
-                item.mezcal.stock -= item.cantidad
-                item.mezcal.save()
-
             # 4. Vaciar el carrito
             items.delete()
 
         serializer = OrdenSerializer(orden)
-
         return Response(
             serializer.data,
             status=status.HTTP_201_CREATED
         )
+
+    @action(detail=True, methods=["POST"], url_path="cancelar")
+    def cancelar(self, request, pk=None):
+        orden = self.get_object()
+
+        if orden.estado != "PENDIENTE":
+            return Response(
+                {"error": "Solo se pueden cancelar órdenes pendientes."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        orden.estado = "CANCELADO"
+        orden.save()
+
+        serializer = OrdenSerializer(orden)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["POST"], url_path="confirmar-pago")
+    def confirmar_pago(self, request, pk=None):
+        orden = self.get_object()
+
+        if orden.estado == "PAGADO":
+            return Response(
+                {"mensaje": "La orden ya fue pagada anteriormente."},
+                status=status.HTTP_200_OK
+            )
+
+        with transaction.atomic():
+            # Descontar stock al confirmar el pago
+            for item in orden.items.all():
+                if item.cantidad > item.mezcal.stock:
+                    return Response(
+                        {"error": f"Stock insuficiente para {item.mezcal.nombre}"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                item.mezcal.stock -= item.cantidad
+                item.mezcal.save()
+
+            orden.estado = "PAGADO"
+            orden.save()
+
+        serializer = OrdenSerializer(orden)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 # =====================================================
 # REGISTRO
