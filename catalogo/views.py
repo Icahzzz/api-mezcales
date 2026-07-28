@@ -133,7 +133,7 @@ class CarritoViewSet(viewsets.ModelViewSet):
         items_data = request.data.get("items", [])
 
         with transaction.atomic():
-            carrito.items.all().delete()  # Limpiar ítems previos para sincronizar estado exacto
+            carrito.items.all().delete()  # Limpiar ítems previos
             for item_data in items_data:
                 mezcal_id = item_data.get("mezcal") or item_data.get("mezcal_id")
                 cantidad = int(item_data.get("cantidad", 1))
@@ -149,15 +149,13 @@ class CarritoViewSet(viewsets.ModelViewSet):
 
 
 # =====================================================
-# ÓRDENES (GESTIÓN COMPLETA + SINCRONIZACIÓN Y PAGO)
+# ÓRDENES (GESTIÓN COMPLETA + COMPRA Y ACEPTAR/RECHAZAR)
 # =====================================================
-# views.py - OrdenViewSet Optimizado
-
 class OrdenViewSet(viewsets.ModelViewSet):
     """
-    Gestión completa de Órdenes y Métodos de Pago.
-    - Admin: Ve todas las órdenes, acepta/rechaza pagos en efectivo y gestiona estados.
-    - Cliente: Ve únicamente sus órdenes y procesa nuevos pagos.
+    Gestión completa de Órdenes.
+    - Admin: Ve todas las órdenes, acepta o rechaza pedidos y gestiona estados.
+    - Cliente: Ve únicamente sus órdenes y realiza compras.
     """
     serializer_class = OrdenSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -169,23 +167,21 @@ class OrdenViewSet(viewsets.ModelViewSet):
         return Orden.objects.filter(usuario=user).order_by('-creado_en')
 
     # -----------------------------------------------------------------
-    # 1. CREACIÓN DEFINITIVA DE ORDEN (Inicia el Proceso de Compra)
+    # 1. CREACIÓN DE ORDEN (Cliente en App Móvil)
     # URL: POST /api/ordenes/crear_orden/
     # -----------------------------------------------------------------
     @action(detail=False, methods=['POST'], url_path='crear_orden')
     def crear_orden(self, request):
         items_data = request.data.get('items', [])
-        metodo_pago = request.data.get('metodo_pago', 'efectivo').lower()
 
         if not items_data:
             return Response({'error': 'El carrito está vacío.'}, status=status.HTTP_400_BAD_REQUEST)
 
         with transaction.atomic():
-            # SIEMPRE crea una NUEVA orden con estado inicial 'pendiente'
+            # Crear nueva orden independiente
             orden = Orden.objects.create(
                 usuario=request.user,
                 estado='pendiente',
-                metodo_pago=metodo_pago,
                 total=0
             )
 
@@ -214,7 +210,7 @@ class OrdenViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(orden).data, status=status.HTTP_201_CREATED)
 
     # -----------------------------------------------------------------
-    # 2. PROCESAR / CONFIRMAR PAGO (App Móvil / Cliente)
+    # 2. PROCESAR / PAGAR PEDIDO (Cliente)
     # URL: POST /api/ordenes/pagar/
     # -----------------------------------------------------------------
     @action(detail=False, methods=['POST'], url_path='pagar')
@@ -233,8 +229,7 @@ class OrdenViewSet(viewsets.ModelViewSet):
         except (Orden.DoesNotExist, ValueError):
             return Response({'error': 'Orden no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
 
-        # 💡 IDEMPOTENCIA: Si la orden ya se pagó o procesó previamente,
-        # devolvemos 200 OK con los datos de la orden en lugar de lanzar error 400.
+        # Idempotencia: Si ya está procesada, devolver la orden sin dar error
         if orden.estado in ['recibido', 'pagado', 'repartiendo', 'entregado']:
             return Response(self.get_serializer(orden).data, status=status.HTTP_200_OK)
 
@@ -242,7 +237,6 @@ class OrdenViewSet(viewsets.ModelViewSet):
             return Response({'error': 'La orden fue cancelada previamente.'}, status=status.HTTP_400_BAD_REQUEST)
 
         with transaction.atomic():
-            # Descontar stock al confirmar el pago/pedido
             for item in orden.items.all():
                 if item.cantidad > item.mezcal.stock:
                     return Response(
@@ -252,29 +246,22 @@ class OrdenViewSet(viewsets.ModelViewSet):
                 item.mezcal.stock -= item.cantidad
                 item.mezcal.save()
 
-            # Definir estado final según el método de pago
-            metodo = str(orden.metodo_pago).lower()
-            if metodo in ['tarjeta', 'stripe', 'mercadopago', 'paypal']:
-                orden.estado = 'pagado'
-            else:
-                orden.estado = 'recibido'  # Pago en efectivo / contra entrega
-
+            orden.estado = 'recibido'
             orden.save()
 
         return Response(self.get_serializer(orden).data, status=status.HTTP_200_OK)
 
     # -----------------------------------------------------------------
-    # 3. ACEPTAR PAGO EN EFECTIVO (Panel de Administrador)
+    # 3. ACEPTAR PEDIDO (Administrador)
     # URL: POST /api/ordenes/<id>/aceptar/
     # -----------------------------------------------------------------
     @action(detail=True, methods=['POST'], url_path='aceptar')
-    def aceptar_efectivo(self, request, pk=None):
+    def aceptar(self, request, pk=None):
         if getattr(request.user, 'rol', None) != 'administrador':
             return Response({'detail': 'No autorizado.'}, status=status.HTTP_403_FORBIDDEN)
 
         orden = self.get_object()
 
-        # Idempotencia para el Administrador
         if orden.estado in ['recibido', 'pagado', 'repartiendo', 'entregado']:
             return Response(self.get_serializer(orden).data, status=status.HTTP_200_OK)
 
@@ -294,7 +281,28 @@ class OrdenViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(orden).data, status=status.HTTP_200_OK)
 
     # -----------------------------------------------------------------
-    # 4. CAMBIO DE ESTADOS GENERALES / PATCH
+    # 4. RECHAZAR PEDIDO (Administrador)
+    # URL: POST /api/ordenes/<id>/rechazar/
+    # -----------------------------------------------------------------
+    @action(detail=True, methods=['POST'], url_path='rechazar')
+    def rechazar(self, request, pk=None):
+        if getattr(request.user, 'rol', None) != 'administrador':
+            return Response({'detail': 'No autorizado.'}, status=status.HTTP_403_FORBIDDEN)
+
+        orden = self.get_object()
+
+        if orden.estado in ['entregado', 'cancelado']:
+            return Response(
+                {'error': f'No se puede rechazar una orden en estado "{orden.estado}".'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        orden.estado = 'cancelado'
+        orden.save()
+        return Response(self.get_serializer(orden).data, status=status.HTTP_200_OK)
+
+    # -----------------------------------------------------------------
+    # 5. CAMBIO DE ESTADOS GENERALES / PATCH
     # -----------------------------------------------------------------
     def partial_update(self, request, *args, **kwargs):
         if getattr(request.user, 'rol', None) != 'administrador':
@@ -307,13 +315,6 @@ class OrdenViewSet(viewsets.ModelViewSet):
         if nuevo_estado not in estados_validos:
             return Response(
                 {'estado': [f'Valor no válido. Opciones: {estados_validos}']}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        metodo_pago = getattr(instance, 'metodo_pago', 'efectivo')
-        if str(metodo_pago).lower() == 'efectivo' and instance.estado == 'pendiente' and nuevo_estado in ['repartiendo', 'entregado']:
-            return Response(
-                {'error': 'Debes aceptar el pago en efectivo antes de enviar o entregar la orden.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -335,7 +336,7 @@ class OrdenViewSet(viewsets.ModelViewSet):
         return Response(OrdenSerializer(instance).data, status=status.HTTP_200_OK)
 
     # -----------------------------------------------------------------
-    # 5. CANCELACIÓN DE ÓRDENES
+    # 6. CANCELACIÓN DE ÓRDENES (Cliente)
     # URL: POST /api/ordenes/<id>/cancelar/
     # -----------------------------------------------------------------
     @action(detail=True, methods=['POST'], url_path='cancelar')
