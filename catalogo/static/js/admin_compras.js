@@ -675,13 +675,13 @@ async function loadCompras() {
   `;
 
   _SR['st-compras'] = () => {
-    const f = ST.filter('st-compras', state.compras, ['id', 'usuario_username'], ['estado', 'metodo_pago']);
+    const f = ST.filter('st-compras', state.compras, ['id', 'usuario_username'], ['estado', 'metodo_pago', 'estado_pedido']);
     const pg = ST.page('st-compras', f);
     const wrapEl = document.getElementById('st-compras-wrap');
 
     if (wrapEl) {
       wrapEl.innerHTML = ST.wrap('st-compras', pg,
-        ['ID Órden', 'Cliente', 'Fecha', 'Total', 'Método Pago', 'Estado Actual', 'Acciones de Gestión'],
+        ['ID Órden', 'Cliente', 'Fecha', 'Total', 'Método Pago', 'Estado Actual', 'Pedido', 'Acciones de Gestión'],
         pg.rows.map(o => {
           const fecha = o.creado_en || o.fecha ? new Date(o.creado_en || o.fecha).toLocaleString('es-MX') : '-';
           return [
@@ -690,23 +690,12 @@ async function loadCompras() {
             fecha,
             money(o.total),
             `<strong style="text-transform:uppercase">${o.metodo_pago || 'efectivo'}</strong>`,
-            renderEstadoBadge(o.estado),
+            renderEstadoBadge(o.estado || 'pendiente'),
+            renderPedidoBadge(o.estado_pedido || o.pedido || 'recibido'),
             renderAccionesOrden(o)
           ];
         }),
         [
-          { 
-            k: 'estado', 
-            lbl: 'Filtrar Estado', 
-            opts: [
-              { v: 'pendiente', l: 'Pendiente' },
-              { v: 'pagado', l: 'Pagado' },
-              { v: 'recibido', l: 'Recibido' },
-              { v: 'repartiendo', l: 'Repartiendo' },
-              { v: 'entregado', l: 'Entregado' },
-              { v: 'cancelado', l: 'Cancelado' }
-            ]
-          },
           { 
             k: 'metodo_pago', 
             lbl: 'Método Pago', 
@@ -714,6 +703,23 @@ async function loadCompras() {
               { v: 'efectivo', l: 'Efectivo' },
               { v: 'tarjeta', l: 'Tarjeta' }
             ] 
+          },
+          { 
+            k: 'estado', 
+            lbl: 'Estado Actual', 
+            opts: [
+              { v: 'pendiente', l: 'Pendiente' },
+              { v: 'pagado', l: 'Pagado' },
+              { v: 'cancelado', l: 'Cancelado' }
+            ]
+          },
+          { 
+            k: 'estado_pedido', 
+            lbl: 'Pedido', 
+            opts: [
+              { v: 'recibido', l: 'Recibido' },
+              { v: 'entregado', l: 'Entregado' }
+            ]
           }
         ]
       );
@@ -722,52 +728,48 @@ async function loadCompras() {
   _SR['st-compras']();
 }
 
-// Visualizador de insignias (Badges) de estado
+// Badge visual para Estado Actual (Pendiente / Pagado / Cancelado)
 function renderEstadoBadge(estado) {
   const colors = {
     pendiente: 'background:#d9822b;color:white;',
-    pagado: 'background:#2b6cb0;color:white;',
-    recibido: 'background:#319795;color:white;',
-    repartiendo: 'background:#805ad5;color:white;',
-    entregado: 'background:#2f855a;color:white;',
+    pagado: 'background:#2f855a;color:white;',
     cancelado: 'background:#c53030;color:white;'
   };
   const style = colors[estado] || 'background:#718096;color:white;';
-  return `<span style="${style}padding:4px 10px;border-radius:12px;font-size:11px;font-weight:700;text-transform:uppercase;">${estado || 'pendiente'}</span>`;
+  return `<span style="${style}padding:4px 10px;border-radius:12px;font-size:11px;font-weight:700;text-transform:uppercase;">${estado}</span>`;
 }
 
-// Generador de acciones directas (Aceptar, Cancelar y Avance de pedido)
-function renderAccionesOrden(o) {
-  const est = o.estado || 'pendiente';
+// Badge visual para Pedido (Recibido / Entregado)
+function renderPedidoBadge(pedido) {
+  const colors = {
+    recibido: 'background:#2b6cb0;color:white;',
+    entregado: 'background:#2f855a;color:white;'
+  };
+  const style = colors[pedido] || 'background:#718096;color:white;';
+  return `<span style="${style}padding:4px 10px;border-radius:12px;font-size:11px;font-weight:700;text-transform:uppercase;">${pedido}</span>`;
+}
 
-  // Si la orden terminó o se canceló, no hay más acciones
-  if (est === 'cancelado' || est === 'entregado') {
-    return `<span style="font-size:12px;color:var(--muted)">Sin acciones disponibles</span>`;
+// Acciones de Gestión: Aceptar y Rechazar
+function renderAccionesOrden(o) {
+  const estado = o.estado || 'pendiente';
+
+  // Si ya no está pendiente, se deshabilitan las acciones
+  if (estado !== 'pendiente') {
+    return `<span style="font-size:12px;color:var(--muted)">Sin acciones</span>`;
   }
 
   return `
-    <div style="display:flex; gap:6px; flex-wrap:wrap;">
-      ${est === 'pendiente' ? `
-        <button class="btn success" onclick="aceptarOrden(${o.id})" style="padding:4px 8px;font-size:11px">Aceptar</button>
-      ` : ''}
-
-      ${['pagado', 'recibido'].includes(est) ? `
-        <button class="btn primary" onclick="cambiarEstadoOrden(${o.id}, 'repartiendo')" style="padding:4px 8px;font-size:11px">Repartiendo</button>
-      ` : ''}
-
-      ${est === 'repartiendo' ? `
-        <button class="btn success" onclick="cambiarEstadoOrden(${o.id}, 'entregado')" style="padding:4px 8px;font-size:11px">Entregado</button>
-      ` : ''}
-
-      <button class="btn danger" onclick="cancelarOrden(${o.id})" style="padding:4px 8px;font-size:11px">Cancelar</button>
+    <div style="display:flex; gap:6px;">
+      <button class="btn success" onclick="aceptarOrden(${o.id})" style="padding:4px 10px;font-size:11px">Aceptar</button>
+      <button class="btn danger" onclick="rechazarOrden(${o.id})" style="padding:4px 10px;font-size:11px">Rechazar</button>
     </div>
   `;
 }
 
-// ================= FUNCIONES DE INTERACCIÓN =================
+// ================= FUNCIONES GLOBALES DE GESTIÓN =================
 
 window.aceptarOrden = async function(id) {
-  if (!confirm(`¿Confirmas aceptar la orden #${id}?`)) return;
+  if (!confirm(`¿Aceptar la orden #${id}? Se marcará como Pagada.`)) return;
   try {
     await api(`${API.compras}${id}/`, {
       method: 'PATCH',
@@ -779,8 +781,8 @@ window.aceptarOrden = async function(id) {
   }
 };
 
-window.cancelarOrden = async function(id) {
-  if (!confirm(`¿Estás seguro de cancelar la orden #${id}?`)) return;
+window.rechazarOrden = async function(id) {
+  if (!confirm(`¿Rechazar la orden #${id}? Se marcará como Cancelada.`)) return;
   try {
     await api(`${API.compras}${id}/`, {
       method: 'PATCH',
@@ -788,19 +790,7 @@ window.cancelarOrden = async function(id) {
     });
     await loadCompras();
   } catch(e) {
-    alert('Error al cancelar la orden: ' + e.message);
-  }
-};
-
-window.cambiarEstadoOrden = async function(id, nuevoEstado) {
-  try {
-    await api(`${API.compras}${id}/`, {
-      method: 'PATCH',
-      body: JSON.stringify({ estado: nuevoEstado })
-    });
-    await loadCompras();
-  } catch(e) {
-    alert('Error al actualizar la orden: ' + e.message);
+    alert('Error al rechazar la orden: ' + e.message);
   }
 };
 
