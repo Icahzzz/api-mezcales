@@ -738,9 +738,8 @@ async function loadCompras() {
 
 // Función helper para detectar correctamente cómo viene el método desde el backend
 function obtenerMetodoPago(orden) {
-  // Busca el valor en cualquiera de los nombres comunes de la API
-  const valor = orden.metodo_pago || orden.metodopago || orden.metodo || orden.pago || '';
-  const str = String(valor).toLowerCase();
+  const valor = orden.metodo_pago || 'efectivo';
+  const str = String(valor).toLowerCase().trim();
 
   if (str.includes('tarjeta') || str.includes('card') || str.includes('stripe') || str.includes('paypal')) {
     return 'tarjeta';
@@ -771,8 +770,11 @@ function renderPedidoBadge(pedido) {
 // Acciones de Gestión
 function renderAccionesOrden(o) {
   const estado = o.estado || 'pendiente';
+  const metodo = o.metodo_pago_normalizado;
 
-  if (estado !== 'pendiente') {
+  const esEfectivoPendiente = estado === 'pendiente' && metodo === 'efectivo';
+
+  if (!esEfectivoPendiente) {
     return `<span style="font-size:12px;color:var(--muted)">Sin acciones</span>`;
   }
 

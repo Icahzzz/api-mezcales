@@ -237,9 +237,8 @@ class OrdenSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Orden
-        fields = ['id', 'usuario', 'total', 'estado', 'items', 'creado_en']
-        read_only_fields = ['id', 'usuario', 'total', 'estado', 'items', 'creado_en']
-
+        fields = ['id', 'usuario', 'total', 'estado', 'metodo_pago', 'items', 'creado_en']
+        read_only_fields = ['id', 'usuario', 'total', 'items', 'creado_en']
 
 class UsuarioSerializer(serializers.ModelSerializer):
     class Meta:
