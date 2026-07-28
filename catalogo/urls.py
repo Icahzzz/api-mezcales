@@ -32,7 +32,7 @@ router.register(r'promociones', PromocionViewSet, basename='admin-promocion')
 # 2. Gestión de Ventas y Compras
 router.register(r'compras', OrdenViewSet, basename='admin-compras')  # <-- Permite /api/compras/
 router.register(r'ordenes', OrdenViewSet, basename='admin-orden')    # <-- Mantiene /api/ordenes/ por si lo usas en otro lado
-router.register(r'carritos', CarritoViewSet, basename='admin-carrito')
+router.register(r'carrito', CarritoViewSet, basename='admin-carrito')
 
 # 3. Usuarios y Clientes
 router.register(r'usuarios', UsuarioViewSet, basename='admin-usuario')
