@@ -55,6 +55,28 @@ class Mezcal(models.Model):
     def __str__(self):
         return f"{self.nombre} ({self.tipo})"
 
+    def promocion_activa(self):
+        from django.utils import timezone
+        hoy = timezone.now().date()
+
+        return self.promociones.filter(
+            activo=True,
+            fecha_inicio__lte=hoy,
+            fecha_fin__gte=hoy
+        ).first()
+
+    def precio_con_descuento(self):
+        from decimal import Decimal
+
+        promo = self.promocion_activa()
+
+        if promo is None:
+            return self.precio
+
+        if promo.tipo_descuento == 'porcentaje':
+            return self.precio - (self.precio * promo.valor_descuento / Decimal("100"))
+
+        return max(Decimal("0"), self.precio - promo.valor_descuento)
 
 class Promocion(models.Model):
     class TipoDescuento(models.TextChoices):
@@ -146,3 +168,22 @@ class OrdenItem(models.Model):
 
     def __str__(self):
         return f"{self.cantidad} x {self.mezcal.nombre} (orden #{self.orden.id})"
+class ConversacionIA(models.Model):
+
+    usuario = models.ForeignKey(
+        Usuario,
+        on_delete=models.CASCADE,
+        related_name="conversaciones_ia"
+    )
+
+    pregunta = models.TextField()
+
+    respuesta = models.TextField()
+
+    creado_en = models.DateTimeField(
+        auto_now_add=True
+    )
+
+
+    def __str__(self):
+        return self.usuario.username
