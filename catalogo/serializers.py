@@ -1,8 +1,20 @@
-from rest_framework import serializers
-from .models import Categoria, Mezcal, Promocion, Resena, Calificacion, Carrito, CarritoItem, Orden, OrdenItem, Usuario
-from django.contrib.auth.password_validation import validate_password
 from decimal import Decimal
+from django.contrib.auth.password_validation import validate_password
 from django.utils import timezone
+from rest_framework import serializers
+
+from .models import (
+    Calificacion,
+    Carrito,
+    CarritoItem,
+    Categoria,
+    Mezcal,
+    Orden,
+    OrdenItem,
+    Promocion,
+    Resena,
+    Usuario,
+)
 
 
 class RegistroSerializer(serializers.ModelSerializer):
@@ -81,12 +93,11 @@ class MezcalSerializer(serializers.ModelSerializer):
     def get_precio_final(self, obj):
         promo = self._promocion_activa(obj)
         if promo is None:
-            return obj.precio
+            return obj.precio or Decimal("0")
 
         if promo.tipo_descuento == 'porcentaje':
-            return obj.precio - (
-                obj.precio * promo.valor_descuento / Decimal("100")
-            )
+            descuento_monto = obj.precio * promo.valor_descuento / Decimal("100")
+            return max(Decimal("0"), obj.precio - descuento_monto)
 
         return max(
             Decimal("0"),
@@ -141,10 +152,12 @@ class ResenaSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'usuario', 'creado_en']
 
     def validate(self, data):
-        usuario = self.context['request'].user
-        mezcal = data.get('mezcal')
-        if Resena.objects.filter(usuario=usuario, mezcal=mezcal).exists():
-            raise serializers.ValidationError("Ya has dejado una reseña para este mezcal.")
+        request = self.context.get('request')
+        if request and hasattr(request, 'user'):
+            usuario = request.user
+            mezcal = data.get('mezcal')
+            if Resena.objects.filter(usuario=usuario, mezcal=mezcal).exists():
+                raise serializers.ValidationError("Ya has dejado una reseña para este mezcal.")
         return data
 
 
@@ -157,10 +170,12 @@ class CalificacionSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'usuario', 'creado_en']
 
     def validate(self, data):
-        usuario = self.context['request'].user
-        mezcal = data.get('mezcal')
-        if Calificacion.objects.filter(usuario=usuario, mezcal=mezcal).exists():
-            raise serializers.ValidationError("Ya has calificado este mezcal.")
+        request = self.context.get('request')
+        if request and hasattr(request, 'user'):
+            usuario = request.user
+            mezcal = data.get('mezcal')
+            if Calificacion.objects.filter(usuario=usuario, mezcal=mezcal).exists():
+                raise serializers.ValidationError("Ya has calificado este mezcal.")
         return data
 
     def validate_valor(self, value):
@@ -179,10 +194,16 @@ class CarritoItemSerializer(serializers.ModelSerializer):
         read_only_fields = ['id']
 
     def get_subtotal(self, obj):
-        precio = getattr(obj.mezcal, 'precio_con_descuento', None)
-        if callable(precio):
-            return obj.cantidad * obj.mezcal.precio_con_descuento()
-        return obj.cantidad * obj.mezcal.precio
+        if not obj.mezcal:
+            return Decimal("0")
+        
+        precio_func = getattr(obj.mezcal, 'precio_con_descuento', None)
+        if callable(precio_func):
+            precio = precio_func() or obj.mezcal.precio or Decimal("0")
+        else:
+            precio = obj.mezcal.precio or Decimal("0")
+
+        return obj.cantidad * precio
 
 
 class CarritoSerializer(serializers.ModelSerializer):
@@ -197,11 +218,13 @@ class CarritoSerializer(serializers.ModelSerializer):
     def get_total(self, obj):
         total_acumulado = Decimal("0")
         for item in obj.items.all():
+            if not item.mezcal:
+                continue
             precio_func = getattr(item.mezcal, 'precio_con_descuento', None)
             if callable(precio_func):
-                precio = item.mezcal.precio_con_descuento()
+                precio = precio_func() or item.mezcal.precio or Decimal("0")
             else:
-                precio = item.mezcal.precio
+                precio = item.mezcal.precio or Decimal("0")
             total_acumulado += item.cantidad * precio
         return total_acumulado
 
@@ -234,11 +257,15 @@ class OrdenItemSerializer(serializers.ModelSerializer):
 class OrdenSerializer(serializers.ModelSerializer):
     items = OrdenItemSerializer(many=True, read_only=True)
     usuario = serializers.ReadOnlyField(source='usuario.username')
+    # Permite recibir metodo_pago u otorgarle un valor predeterminado si viene vacío desde Android
+    metodo_pago = serializers.CharField(required=False, allow_blank=True, default='efectivo')
+    estado = serializers.CharField(required=False, default='pendiente')
 
     class Meta:
         model = Orden
         fields = ['id', 'usuario', 'total', 'estado', 'metodo_pago', 'items', 'creado_en']
         read_only_fields = ['id', 'usuario', 'total', 'items', 'creado_en']
+
 
 class UsuarioSerializer(serializers.ModelSerializer):
     class Meta:
