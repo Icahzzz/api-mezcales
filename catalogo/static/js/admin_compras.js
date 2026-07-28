@@ -661,6 +661,17 @@ async function loadUsuarios() {
   };
 }
 
+function estadoActualDeOrden(estado) {
+  if (estado === 'pendiente') return 'pendiente';
+  if (estado === 'cancelado') return 'cancelado';
+  return 'pagado'; // pagado, recibido, repartiendo, entregado -> se agrupan como "pagado"
+}
+
+function pedidoDeOrden(estado) {
+  const map = { pagado: 'Recibido', recibido: 'Recibido', repartiendo: 'En reparto', entregado: 'Entregado' };
+  return map[estado] || null; // null = no aplica (pendiente o cancelado)
+}
+
 // ================= VISTA COMPRAS =================
 async function loadCompras() {
   state.compras = await api(API.compras);
@@ -674,14 +685,15 @@ async function loadCompras() {
     </article>
   `;
 
-  // Normalizamos el método de pago en cada objeto para que el filtro ST funcione bien
   state.compras = state.compras.map(o => ({
     ...o,
-    metodo_pago_normalizado: obtenerMetodoPago(o)
+    metodo_pago_normalizado: obtenerMetodoPago(o),
+    estado_actual: estadoActualDeOrden(o.estado || 'pendiente'),
+    pedido_display: pedidoDeOrden(o.estado || 'pendiente')
   }));
 
   _SR['st-compras'] = () => {
-    const f = ST.filter('st-compras', state.compras, ['id', 'usuario_username'], ['estado', 'metodo_pago_normalizado', 'estado_pedido']);
+    const f = ST.filter('st-compras', state.compras, ['id', 'usuario_username'], ['estado_actual', 'metodo_pago_normalizado']);
     const pg = ST.page('st-compras', f);
     const wrapEl = document.getElementById('st-compras-wrap');
 
@@ -691,42 +703,34 @@ async function loadCompras() {
         pg.rows.map(o => {
           const fecha = o.creado_en || o.fecha ? new Date(o.creado_en || o.fecha).toLocaleString('es-MX') : '-';
           const metodoDisplay = o.metodo_pago_normalizado.toUpperCase();
-          
+
           return [
             `#${o.id}`,
             o.usuario_username || o.usuario || 'Cliente',
             fecha,
             money(o.total),
             `<strong style="color: ${metodoDisplay === 'TARJETA' ? '#2b6cb0' : '#2f855a'}">${metodoDisplay}</strong>`,
-            renderEstadoBadge(o.estado || 'pendiente'),
-            renderPedidoBadge(o.estado_pedido || o.pedido || 'recibido'),
+            renderEstadoBadge(o.estado_actual),
+            o.pedido_display ? renderPedidoBadge(o.pedido_display) : '<span style="color:var(--muted);font-size:12px">—</span>',
             renderAccionesOrden(o)
           ];
         }),
         [
-          { 
-            k: 'metodo_pago_normalizado', 
-            lbl: 'Método Pago', 
+          {
+            k: 'metodo_pago_normalizado',
+            lbl: 'Método Pago',
             opts: [
               { v: 'efectivo', l: 'Efectivo' },
               { v: 'tarjeta', l: 'Tarjeta' }
-            ] 
+            ]
           },
-          { 
-            k: 'estado', 
-            lbl: 'Estado Actual', 
+          {
+            k: 'estado_actual',
+            lbl: 'Estado Actual',
             opts: [
               { v: 'pendiente', l: 'Pendiente' },
               { v: 'pagado', l: 'Pagado' },
               { v: 'cancelado', l: 'Cancelado' }
-            ]
-          },
-          { 
-            k: 'estado_pedido', 
-            lbl: 'Pedido', 
-            opts: [
-              { v: 'recibido', l: 'Recibido' },
-              { v: 'entregado', l: 'Entregado' }
             ]
           }
         ]
@@ -760,8 +764,9 @@ function renderEstadoBadge(estado) {
 
 function renderPedidoBadge(pedido) {
   const colors = {
-    recibido: 'background:#2b6cb0;color:white;',
-    entregado: 'background:#2f855a;color:white;'
+    'Recibido': 'background:#2b6cb0;color:white;',
+    'En reparto': 'background:#b7791f;color:white;',
+    'Entregado': 'background:#2f855a;color:white;'
   };
   const style = colors[pedido] || 'background:#718096;color:white;';
   return `<span style="${style}padding:4px 10px;border-radius:12px;font-size:11px;font-weight:700;text-transform:uppercase;">${pedido}</span>`;
@@ -770,11 +775,8 @@ function renderPedidoBadge(pedido) {
 // Acciones de Gestión
 function renderAccionesOrden(o) {
   const estado = o.estado || 'pendiente';
-  const metodo = o.metodo_pago_normalizado;
 
-  const esEfectivoPendiente = estado === 'pendiente' && metodo === 'efectivo';
-
-  if (!esEfectivoPendiente) {
+  if (estado !== 'pendiente') {
     return `<span style="font-size:12px;color:var(--muted)">Sin acciones</span>`;
   }
 

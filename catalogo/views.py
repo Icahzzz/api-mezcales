@@ -173,15 +173,16 @@ class OrdenViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['POST'], url_path='crear_orden')
     def crear_orden(self, request):
         items_data = request.data.get('items', [])
+        metodo_pago = request.data.get('metodo_pago', 'efectivo')
 
         if not items_data:
             return Response({'error': 'El carrito está vacío.'}, status=status.HTTP_400_BAD_REQUEST)
 
         with transaction.atomic():
-            # Crear nueva orden independiente
             orden = Orden.objects.create(
                 usuario=request.user,
                 estado='pendiente',
+                metodo_pago=metodo_pago,
                 total=0
             )
 
@@ -208,7 +209,6 @@ class OrdenViewSet(viewsets.ModelViewSet):
             orden.save()
 
         return Response(self.get_serializer(orden).data, status=status.HTTP_201_CREATED)
-
     # -----------------------------------------------------------------
     # 2. PROCESAR / PAGAR PEDIDO (Cliente)
     # URL: POST /api/ordenes/pagar/
