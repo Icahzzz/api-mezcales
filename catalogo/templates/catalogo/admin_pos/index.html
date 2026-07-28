@@ -19,6 +19,7 @@
     <h2>Acceso Administrador POS</h2>
     <p>Inicia sesión con tu cuenta admin para operar el punto de venta.</p>
     <form id="formLogin" method="POST" style="grid-template-columns:1fr;">
+      {% csrf_token %}
       <div>
         <label>Usuario</label>
         <input name="username" required autocomplete="username" />
