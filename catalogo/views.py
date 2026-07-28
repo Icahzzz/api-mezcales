@@ -85,7 +85,7 @@ class CalificacionViewSet(viewsets.ModelViewSet):
 
 
 # =====================================================
-# CARRITO
+# CARRITO DE COMPRAS
 # =====================================================
 class CarritoViewSet(viewsets.ModelViewSet):
     serializer_class = CarritoSerializer
@@ -125,7 +125,7 @@ class CarritoViewSet(viewsets.ModelViewSet):
 
     # -----------------------------------------------------------------
     # ACCIÓN SINCRONIZAR (Soporte para App Móvil / Cliente)
-    # URL: POST /api/carritos/sincronizar/ o /api/carrito/sincronizar/
+    # URL: POST /api/carritos/sincronizar/
     # -----------------------------------------------------------------
     @action(detail=False, methods=["POST"], url_path="sincronizar")
     def sincronizar(self, request):
@@ -133,25 +133,23 @@ class CarritoViewSet(viewsets.ModelViewSet):
         items_data = request.data.get("items", [])
 
         with transaction.atomic():
+            carrito.items.all().delete()  # Limpiar ítems previos para sincronizar estado exacto
             for item_data in items_data:
                 mezcal_id = item_data.get("mezcal") or item_data.get("mezcal_id")
                 cantidad = int(item_data.get("cantidad", 1))
 
                 if mezcal_id:
-                    item, creado = CarritoItem.objects.get_or_create(
+                    CarritoItem.objects.create(
                         carrito=carrito,
                         mezcal_id=mezcal_id,
-                        defaults={"cantidad": cantidad}
+                        cantidad=cantidad
                     )
-                    if not creado:
-                        item.cantidad = cantidad
-                        item.save()
 
         return Response(self.get_serializer(carrito).data, status=status.HTTP_200_OK)
 
 
 # =====================================================
-# ÓRDENES (GESTIÓN COMPLETA + EFECTIVO Y ESTADOS)
+# ÓRDENES (GESTIÓN COMPLETA + SINCRONIZACIÓN Y PAGO)
 # =====================================================
 class OrdenViewSet(viewsets.ModelViewSet):
     """
@@ -167,35 +165,72 @@ class OrdenViewSet(viewsets.ModelViewSet):
             return Orden.objects.all().select_related('usuario').order_by('-creado_en')
         return Orden.objects.filter(usuario=user).order_by('-creado_en')
 
-   # -----------------------------------------------------------------
+    # -----------------------------------------------------------------
+    # SINCRONIZACIÓN DE ORDEN PENDIENTE DESDE LA APP MÓVIL
+    # URL: POST /api/ordenes/sincronizar/
+    # -----------------------------------------------------------------
+    @action(detail=False, methods=['POST'], url_path='sincronizar')
+    def sincronizar_orden(self, request):
+        items_data = request.data.get('items', [])
+        if not items_data:
+            return Response({'error': 'El carrito está vacío.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            # Obtener o crear una orden en estado 'pendiente' para el usuario actual
+            orden, creado = Orden.objects.get_or_create(
+                usuario=request.user,
+                estado='pendiente',
+                defaults={'total': 0, 'metodo_pago': 'efectivo'}
+            )
+
+            # Limpiar los ítems antiguos de esta orden pendiente
+            orden.items.all().delete()
+
+            total = 0
+            for item in items_data:
+                mezcal_id = item.get('mezcal') or item.get('mezcal_id')
+                cantidad = int(item.get('cantidad', 1))
+
+                try:
+                    mezcal = Mezcal.objects.get(id=mezcal_id)
+                    precio = mezcal.precio
+                    total += precio * cantidad
+
+                    OrdenItem.objects.create(
+                        orden=orden,
+                        mezcal=mezcal,
+                        cantidad=cantidad,
+                        precio_unitario=precio
+                    )
+                except Mezcal.DoesNotExist:
+                    continue
+
+            orden.total = total
+            orden.save()
+
+        return Response(self.get_serializer(orden).data, status=status.HTTP_200_OK)
+
+    # -----------------------------------------------------------------
     # 1. PAGO DE ORDEN DESDE APP MÓVIL
     # URL: POST /api/ordenes/pagar/
     # -----------------------------------------------------------------
     @action(detail=False, methods=['POST'], url_path='pagar')
     def pagar(self, request):
-        # 1. Buscar en request.data (JSON body)
         orden_id = (
             request.data.get('orden_id') or 
             request.data.get('id') or 
-            request.data.get('orden')
+            request.data.get('orden') or
+            request.query_params.get('orden_id') or 
+            request.query_params.get('id')
         )
 
-        # 2. Si no viene en el body, buscar en query params (?orden_id=X o ?id=X)
-        if not orden_id:
-            orden_id = (
-                request.query_params.get('orden_id') or 
-                request.query_params.get('id') or 
-                request.query_params.get('orden')
-            )
-        
         if not orden_id:
             return Response(
-                {'error': 'Se requiere el parámetro "orden_id" o "id" en el cuerpo de la petición o en la URL.'},
+                {'error': 'Se requiere el parámetro "orden_id" o "id".'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
-            # Los usuarios normales solo pueden pagar sus propias órdenes; el admin puede procesar cualquiera
             if getattr(request.user, 'rol', None) == 'administrador':
                 orden = Orden.objects.get(id=orden_id)
             else:
@@ -210,7 +245,6 @@ class OrdenViewSet(viewsets.ModelViewSet):
             )
 
         with transaction.atomic():
-            # Verificar y descontar el inventario de cada mezcal en la orden
             for item in orden.items.all():
                 if item.cantidad > item.mezcal.stock:
                     return Response(
@@ -220,7 +254,6 @@ class OrdenViewSet(viewsets.ModelViewSet):
                 item.mezcal.stock -= item.cantidad
                 item.mezcal.save()
 
-            # Transición de estado a recibido para comenzar el proceso logístico
             orden.estado = 'recibido'
             orden.save()
 
@@ -228,17 +261,15 @@ class OrdenViewSet(viewsets.ModelViewSet):
 
     # -----------------------------------------------------------------
     # 2. ACEPTAR PAGO EN EFECTIVO (Solo Administrador)
-    # URL: POST /api/compras/<id>/aceptar/ o /api/ordenes/<id>/aceptar/
+    # URL: POST /api/ordenes/<id>/aceptar/
     # -----------------------------------------------------------------
     @action(detail=True, methods=['POST'], url_path='aceptar')
     def aceptar_efectivo(self, request, pk=None):
-        user = request.user
-        if getattr(user, 'rol', None) != 'administrador':
+        if getattr(request.user, 'rol', None) != 'administrador':
             return Response({'detail': 'No autorizado.'}, status=status.HTTP_403_FORBIDDEN)
 
         orden = self.get_object()
 
-        # Validar que la orden haya sido solicitada con pago en efectivo
         metodo_pago = getattr(orden, 'metodo_pago', 'efectivo')
         if str(metodo_pago).lower() != 'efectivo':
             return Response(
@@ -253,7 +284,6 @@ class OrdenViewSet(viewsets.ModelViewSet):
             )
 
         with transaction.atomic():
-            # Verificar y descontar stock al momento de aceptar el efectivo
             for item in orden.items.all():
                 if item.cantidad > item.mezcal.stock:
                     return Response(
@@ -270,12 +300,11 @@ class OrdenViewSet(viewsets.ModelViewSet):
 
     # -----------------------------------------------------------------
     # 3. RECHAZAR PAGO EN EFECTIVO (Solo Administrador)
-    # URL: POST /api/compras/<id>/rechazar/ o /api/ordenes/<id>/rechazar/
+    # URL: POST /api/ordenes/<id>/rechazar/
     # -----------------------------------------------------------------
     @action(detail=True, methods=['POST'], url_path='rechazar')
     def rechazar_efectivo(self, request, pk=None):
-        user = request.user
-        if getattr(user, 'rol', None) != 'administrador':
+        if getattr(request.user, 'rol', None) != 'administrador':
             return Response({'detail': 'No autorizado.'}, status=status.HTTP_403_FORBIDDEN)
 
         orden = self.get_object()
@@ -291,11 +320,10 @@ class OrdenViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(orden).data, status=status.HTTP_200_OK)
 
     # -----------------------------------------------------------------
-    # 4. CAMBIO DE ESTADOS GENERALES / PATCH (Recibido -> Repartiendo -> Entregado)
+    # 4. CAMBIO DE ESTADOS GENERALES / PATCH
     # -----------------------------------------------------------------
     def partial_update(self, request, *args, **kwargs):
-        user = request.user
-        if getattr(user, 'rol', None) != 'administrador':
+        if getattr(request.user, 'rol', None) != 'administrador':
             return Response({'detail': 'No autorizado.'}, status=status.HTTP_403_FORBIDDEN)
 
         instance = self.get_object()
@@ -308,7 +336,6 @@ class OrdenViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Regla: Si sigue en "pendiente", no se le puede cambiar el estado directo a "repartiendo" o "entregado" sin haber sido aceptada/pagada
         metodo_pago = getattr(instance, 'metodo_pago', 'efectivo')
         if str(metodo_pago).lower() == 'efectivo' and instance.estado == 'pendiente' and nuevo_estado in ['repartiendo', 'entregado']:
             return Response(
@@ -317,7 +344,6 @@ class OrdenViewSet(viewsets.ModelViewSet):
             )
 
         with transaction.atomic():
-            # Si cambia de pendiente a un estado activo por PATCH
             estados_activos = ['recibido', 'repartiendo', 'entregado', 'pagado']
             if instance.estado == 'pendiente' and nuevo_estado in estados_activos:
                 for item in instance.items.all():
@@ -335,47 +361,7 @@ class OrdenViewSet(viewsets.ModelViewSet):
         return Response(OrdenSerializer(instance).data, status=status.HTTP_200_OK)
 
     # -----------------------------------------------------------------
-    # 5. CREACIÓN DE ÓRDENES
-    # URL: POST /api/ordenes/crear-orden/
-    # -----------------------------------------------------------------
-    @action(detail=False, methods=['POST'], url_path='crear-orden')
-    def crear_orden(self, request):
-        try:
-            carrito = Carrito.objects.get(usuario=request.user)
-        except Carrito.DoesNotExist:
-            return Response({'error': 'No tienes un carrito.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        items_carrito = carrito.items.all()
-        if not items_carrito:
-            return Response({'error': 'Tu carrito está vacío.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        metodo_pago = request.data.get('metodo_pago', 'efectivo')
-
-        with transaction.atomic():
-            total = sum(item.cantidad * item.mezcal.precio for item in items_carrito)
-            
-            # Se crea por defecto en 'pendiente'
-            orden = Orden.objects.create(
-                usuario=request.user, 
-                total=total, 
-                estado='pendiente',
-                metodo_pago=metodo_pago
-            )
-
-            for item in items_carrito:
-                OrdenItem.objects.create(
-                    orden=orden,
-                    mezcal=item.mezcal,
-                    cantidad=item.cantidad,
-                    precio_unitario=item.mezcal.precio,
-                )
-
-            items_carrito.delete()
-
-        return Response(self.get_serializer(orden).data, status=status.HTTP_201_CREATED)
-
-    # -----------------------------------------------------------------
-    # 6. CANCELACIÓN DE ÓRDENES
+    # 5. CANCELACIÓN DE ÓRDENES
     # URL: POST /api/ordenes/<id>/cancelar/
     # -----------------------------------------------------------------
     @action(detail=True, methods=['POST'], url_path='cancelar')
@@ -407,14 +393,14 @@ class ReporteVentasViewSet(viewsets.ViewSet):
     permission_classes = [EsAdministrador]
 
     def list(self, request):
-        ordenes = Orden.objects.filter(estado__in=['pagado', 'entregado'])
+        ordenes = Orden.objects.filter(estado__in=['pagado', 'entregado', 'recibido'])
         total_ventas = ordenes.aggregate(total=Sum("total"))["total"] or 0
         total_ordenes = ordenes.count()
         ticket = (total_ventas / total_ordenes) if total_ordenes else 0
 
         top = (
             OrdenItem.objects
-            .filter(orden__estado__in=['pagado', 'entregado'])
+            .filter(orden__estado__in=['pagado', 'entregado', 'recibido'])
             .values("mezcal__nombre")
             .annotate(cantidad=Sum("cantidad"))
             .order_by("-cantidad")[:10]
