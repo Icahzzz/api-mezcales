@@ -125,11 +125,11 @@ class CarritoViewSet(viewsets.ModelViewSet):
 
 
 # =====================================================
-# ÓRDENES (GESTIÓN COMPLETA + CAMBIO DE ESTADO)
+# ÓRDENES (GESTIÓN COMPLETA + EFECTIVO Y ESTADOS)
 # =====================================================
 class OrdenViewSet(viewsets.ModelViewSet):
     """
-    - Admin: Ve todas las órdenes y actualiza su estado con PATCH.
+    - Admin: Ve todas las órdenes, acepta/rechaza pagos en efectivo y cambia su estado.
     - Cliente: Ve únicamente sus órdenes.
     """
     serializer_class = OrdenSerializer
@@ -141,11 +141,75 @@ class OrdenViewSet(viewsets.ModelViewSet):
             return Orden.objects.all().select_related('usuario').order_by('-creado_en')
         return Orden.objects.filter(usuario=user).order_by('-creado_en')
 
+    # -----------------------------------------------------------------
+    # 1. ACEPTAR PAGO EN EFECTIVO (Solo Administrador)
+    # URL: POST /api/compras/<id>/aceptar/
+    # -----------------------------------------------------------------
+    @action(detail=True, methods=['POST'], url_path='aceptar')
+    def aceptar_efectivo(self, request, pk=None):
+        user = request.user
+        if getattr(user, 'rol', None) != 'administrador':
+            return Response({'detail': 'No autorizado.'}, status=status.HTTP_403_FORBIDDEN)
+
+        orden = self.get_object()
+
+        # Validar que la orden haya sido solicitada con pago en efectivo
+        metodo_pago = getattr(orden, 'metodo_pago', 'efectivo')
+        if str(metodo_pago).lower() != 'efectivo':
+            return Response(
+                {'error': 'Esta acción solo aplica para órdenes con método de pago en efectivo.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if orden.estado != 'pendiente':
+            return Response(
+                {'error': f'La orden ya fue procesada anteriormente. Estado actual: {orden.estado}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        with transaction.atomic():
+            # Verificar y descontar stock al momento de aceptar el efectivo
+            for item in orden.items.all():
+                if item.cantidad > item.mezcal.stock:
+                    return Response(
+                        {'error': f'Stock insuficiente para {item.mezcal.nombre}. Disponible: {item.mezcal.stock}'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                item.mezcal.stock -= item.cantidad
+                item.mezcal.save()
+
+            # Pasa el estado a "recibido" (o "pagado") para iniciar logística
+            orden.estado = 'recibido'
+            orden.save()
+
+        return Response(self.get_serializer(orden).data, status=status.HTTP_200_OK)
+
+    # -----------------------------------------------------------------
+    # 2. RECHAZAR PAGO EN EFECTIVO (Solo Administrador)
+    # URL: POST /api/compras/<id>/rechazar/
+    # -----------------------------------------------------------------
+    @action(detail=True, methods=['POST'], url_path='rechazar')
+    def rechazar_efectivo(self, request, pk=None):
+        user = request.user
+        if getattr(user, 'rol', None) != 'administrador':
+            return Response({'detail': 'No autorizado.'}, status=status.HTTP_403_FORBIDDEN)
+
+        orden = self.get_object()
+
+        if orden.estado in ['entregado', 'cancelado']:
+            return Response(
+                {'error': f'No se puede rechazar una orden en estado "{orden.estado}".'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        orden.estado = 'cancelado'
+        orden.save()
+        return Response(self.get_serializer(orden).data, status=status.HTTP_200_OK)
+
+    # -----------------------------------------------------------------
+    # 3. CAMBIO DE ESTADOS GENERALES / PATCH (Recibido -> Repartiendo -> Entregado)
+    # -----------------------------------------------------------------
     def partial_update(self, request, *args, **kwargs):
-        """
-        Permite al ADMINISTRADOR cambiar el estado de una orden (PATCH /api/ordenes/<id>/).
-        Descuenta el stock cuando pasa de 'pendiente' a un estado activo.
-        """
         user = request.user
         if getattr(user, 'rol', None) != 'administrador':
             return Response({'detail': 'No autorizado.'}, status=status.HTTP_403_FORBIDDEN)
@@ -160,8 +224,16 @@ class OrdenViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Regla: Si sigue en "pendiente", no se le puede cambiar el estado directo a "repartiendo" o "entregado" sin haber sido aceptada/pagada
+        metodo_pago = getattr(instance, 'metodo_pago', 'efectivo')
+        if str(metodo_pago).lower() == 'efectivo' and instance.estado == 'pendiente' and nuevo_estado in ['repartiendo', 'entregado']:
+            return Response(
+                {'error': 'Debes aceptar el pago en efectivo antes de enviar o entregar la orden.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         with transaction.atomic():
-            # Si estaba pendiente y pasa a un estado en proceso, descontamos stock
+            # Si cambia de pendiente a un estado activo por PATCH
             estados_activos = ['recibido', 'repartiendo', 'entregado', 'pagado']
             if instance.estado == 'pendiente' and nuevo_estado in estados_activos:
                 for item in instance.items.all():
@@ -189,12 +261,17 @@ class OrdenViewSet(viewsets.ModelViewSet):
         if not items_carrito:
             return Response({'error': 'Tu carrito está vacío.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        metodo_pago = request.data.get('metodo_pago', 'efectivo')
+
         with transaction.atomic():
             total = sum(item.cantidad * item.mezcal.precio for item in items_carrito)
+            
+            # Se crea por defecto en 'pendiente'
             orden = Orden.objects.create(
                 usuario=request.user, 
                 total=total, 
-                estado='pendiente'
+                estado='pendiente',
+                metodo_pago=metodo_pago
             )
 
             for item in items_carrito:
@@ -218,7 +295,6 @@ class OrdenViewSet(viewsets.ModelViewSet):
         orden.estado = 'cancelado'
         orden.save()
         return Response(self.get_serializer(orden).data, status=status.HTTP_200_OK)
-
 
 # =====================================================
 # OTROS ENDPOINTS (REGISTRO, USUARIOS, REPORTES, PERFIL)
