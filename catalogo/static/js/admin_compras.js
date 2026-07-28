@@ -674,8 +674,14 @@ async function loadCompras() {
     </article>
   `;
 
+  // Normalizamos el método de pago en cada objeto para que el filtro ST funcione bien
+  state.compras = state.compras.map(o => ({
+    ...o,
+    metodo_pago_normalizado: obtenerMetodoPago(o)
+  }));
+
   _SR['st-compras'] = () => {
-    const f = ST.filter('st-compras', state.compras, ['id', 'usuario_username'], ['estado', 'metodo_pago', 'estado_pedido']);
+    const f = ST.filter('st-compras', state.compras, ['id', 'usuario_username'], ['estado', 'metodo_pago_normalizado', 'estado_pedido']);
     const pg = ST.page('st-compras', f);
     const wrapEl = document.getElementById('st-compras-wrap');
 
@@ -684,12 +690,14 @@ async function loadCompras() {
         ['ID Órden', 'Cliente', 'Fecha', 'Total', 'Método Pago', 'Estado Actual', 'Pedido', 'Acciones de Gestión'],
         pg.rows.map(o => {
           const fecha = o.creado_en || o.fecha ? new Date(o.creado_en || o.fecha).toLocaleString('es-MX') : '-';
+          const metodoDisplay = o.metodo_pago_normalizado.toUpperCase();
+          
           return [
             `#${o.id}`,
             o.usuario_username || o.usuario || 'Cliente',
             fecha,
             money(o.total),
-            `<strong style="text-transform:uppercase">${o.metodo_pago || 'efectivo'}</strong>`,
+            `<strong style="color: ${metodoDisplay === 'TARJETA' ? '#2b6cb0' : '#2f855a'}">${metodoDisplay}</strong>`,
             renderEstadoBadge(o.estado || 'pendiente'),
             renderPedidoBadge(o.estado_pedido || o.pedido || 'recibido'),
             renderAccionesOrden(o)
@@ -697,7 +705,7 @@ async function loadCompras() {
         }),
         [
           { 
-            k: 'metodo_pago', 
+            k: 'metodo_pago_normalizado', 
             lbl: 'Método Pago', 
             opts: [
               { v: 'efectivo', l: 'Efectivo' },
@@ -728,7 +736,19 @@ async function loadCompras() {
   _SR['st-compras']();
 }
 
-// Badge visual para Estado Actual (Pendiente / Pagado / Cancelado)
+// Función helper para detectar correctamente cómo viene el método desde el backend
+function obtenerMetodoPago(orden) {
+  // Busca el valor en cualquiera de los nombres comunes de la API
+  const valor = orden.metodo_pago || orden.metodopago || orden.metodo || orden.pago || '';
+  const str = String(valor).toLowerCase();
+
+  if (str.includes('tarjeta') || str.includes('card') || str.includes('stripe') || str.includes('paypal')) {
+    return 'tarjeta';
+  }
+  return 'efectivo';
+}
+
+// Badges visuales
 function renderEstadoBadge(estado) {
   const colors = {
     pendiente: 'background:#d9822b;color:white;',
@@ -739,7 +759,6 @@ function renderEstadoBadge(estado) {
   return `<span style="${style}padding:4px 10px;border-radius:12px;font-size:11px;font-weight:700;text-transform:uppercase;">${estado}</span>`;
 }
 
-// Badge visual para Pedido (Recibido / Entregado)
 function renderPedidoBadge(pedido) {
   const colors = {
     recibido: 'background:#2b6cb0;color:white;',
@@ -749,11 +768,10 @@ function renderPedidoBadge(pedido) {
   return `<span style="${style}padding:4px 10px;border-radius:12px;font-size:11px;font-weight:700;text-transform:uppercase;">${pedido}</span>`;
 }
 
-// Acciones de Gestión: Aceptar y Rechazar
+// Acciones de Gestión
 function renderAccionesOrden(o) {
   const estado = o.estado || 'pendiente';
 
-  // Si ya no está pendiente, se deshabilitan las acciones
   if (estado !== 'pendiente') {
     return `<span style="font-size:12px;color:var(--muted)">Sin acciones</span>`;
   }
@@ -765,6 +783,33 @@ function renderAccionesOrden(o) {
     </div>
   `;
 }
+
+// Funciones globales
+window.aceptarOrden = async function(id) {
+  if (!confirm(`¿Aceptar la orden #${id}? Se marcará como Pagada.`)) return;
+  try {
+    await api(`${API.compras}${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify({ estado: 'pagado' })
+    });
+    await loadCompras();
+  } catch(e) {
+    alert('Error al aceptar la orden: ' + e.message);
+  }
+};
+
+window.rechazarOrden = async function(id) {
+  if (!confirm(`¿Rechazar la orden #${id}? Se marcará como Cancelada.`)) return;
+  try {
+    await api(`${API.compras}${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify({ estado: 'cancelado' })
+    });
+    await loadCompras();
+  } catch(e) {
+    alert('Error al rechazar la orden: ' + e.message);
+  }
+};
 
 // ================= FUNCIONES GLOBALES DE GESTIÓN =================
 
