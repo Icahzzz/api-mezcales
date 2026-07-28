@@ -151,10 +151,13 @@ class CarritoViewSet(viewsets.ModelViewSet):
 # =====================================================
 # ÓRDENES (GESTIÓN COMPLETA + SINCRONIZACIÓN Y PAGO)
 # =====================================================
+# views.py - OrdenViewSet Optimizado
+
 class OrdenViewSet(viewsets.ModelViewSet):
     """
-    - Admin: Ve todas las órdenes, acepta/rechaza pagos en efectivo y cambia su estado.
-    - Cliente: Ve únicamente sus órdenes.
+    Gestión completa de Órdenes y Métodos de Pago.
+    - Admin: Ve todas las órdenes, acepta/rechaza pagos en efectivo y gestiona estados.
+    - Cliente: Ve únicamente sus órdenes y procesa nuevos pagos.
     """
     serializer_class = OrdenSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -166,25 +169,25 @@ class OrdenViewSet(viewsets.ModelViewSet):
         return Orden.objects.filter(usuario=user).order_by('-creado_en')
 
     # -----------------------------------------------------------------
-    # SINCRONIZACIÓN DE ORDEN PENDIENTE DESDE LA APP MÓVIL
-    # URL: POST /api/ordenes/sincronizar/
+    # 1. CREACIÓN DEFINITIVA DE ORDEN (Inicia el Proceso de Compra)
+    # URL: POST /api/ordenes/crear_orden/
     # -----------------------------------------------------------------
-    @action(detail=False, methods=['POST'], url_path='sincronizar')
-    def sincronizar_orden(self, request):
+    @action(detail=False, methods=['POST'], url_path='crear_orden')
+    def crear_orden(self, request):
         items_data = request.data.get('items', [])
+        metodo_pago = request.data.get('metodo_pago', 'efectivo').lower()
+
         if not items_data:
             return Response({'error': 'El carrito está vacío.'}, status=status.HTTP_400_BAD_REQUEST)
 
         with transaction.atomic():
-            # Obtener o crear una orden en estado 'pendiente' para el usuario actual
-            orden, creado = Orden.objects.get_or_create(
+            # SIEMPRE crea una NUEVA orden con estado inicial 'pendiente'
+            orden = Orden.objects.create(
                 usuario=request.user,
                 estado='pendiente',
-                defaults={'total': 0, 'metodo_pago': 'efectivo'}
+                metodo_pago=metodo_pago,
+                total=0
             )
-
-            # Limpiar los ítems antiguos de esta orden pendiente
-            orden.items.all().delete()
 
             total = 0
             for item in items_data:
@@ -208,10 +211,10 @@ class OrdenViewSet(viewsets.ModelViewSet):
             orden.total = total
             orden.save()
 
-        return Response(self.get_serializer(orden).data, status=status.HTTP_200_OK)
+        return Response(self.get_serializer(orden).data, status=status.HTTP_201_CREATED)
 
     # -----------------------------------------------------------------
-    # 1. PAGO DE ORDEN DESDE APP MÓVIL
+    # 2. PROCESAR / CONFIRMAR PAGO (App Móvil / Cliente)
     # URL: POST /api/ordenes/pagar/
     # -----------------------------------------------------------------
     @action(detail=False, methods=['POST'], url_path='pagar')
@@ -219,32 +222,27 @@ class OrdenViewSet(viewsets.ModelViewSet):
         orden_id = (
             request.data.get('orden_id') or 
             request.data.get('id') or 
-            request.data.get('orden') or
-            request.query_params.get('orden_id') or 
-            request.query_params.get('id')
+            request.data.get('orden')
         )
 
         if not orden_id:
-            return Response(
-                {'error': 'Se requiere el parámetro "orden_id" o "id".'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'error': 'Se requiere "orden_id".'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            if getattr(request.user, 'rol', None) == 'administrador':
-                orden = Orden.objects.get(id=orden_id)
-            else:
-                orden = Orden.objects.get(id=orden_id, usuario=request.user)
+            orden = Orden.objects.get(id=orden_id, usuario=request.user)
         except (Orden.DoesNotExist, ValueError):
-            return Response({'error': 'Orden no encontrada o ID no válido.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': 'Orden no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
 
-        if orden.estado != 'pendiente':
-            return Response(
-                {'error': f'La orden ya se encuentra en estado "{orden.estado}".'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        # 💡 IDEMPOTENCIA: Si la orden ya se pagó o procesó previamente,
+        # devolvemos 200 OK con los datos de la orden en lugar de lanzar error 400.
+        if orden.estado in ['recibido', 'pagado', 'repartiendo', 'entregado']:
+            return Response(self.get_serializer(orden).data, status=status.HTTP_200_OK)
+
+        if orden.estado == 'cancelado':
+            return Response({'error': 'La orden fue cancelada previamente.'}, status=status.HTTP_400_BAD_REQUEST)
 
         with transaction.atomic():
+            # Descontar stock al confirmar el pago/pedido
             for item in orden.items.all():
                 if item.cantidad > item.mezcal.stock:
                     return Response(
@@ -254,13 +252,19 @@ class OrdenViewSet(viewsets.ModelViewSet):
                 item.mezcal.stock -= item.cantidad
                 item.mezcal.save()
 
-            orden.estado = 'recibido'
+            # Definir estado final según el método de pago
+            metodo = str(orden.metodo_pago).lower()
+            if metodo in ['tarjeta', 'stripe', 'mercadopago', 'paypal']:
+                orden.estado = 'pagado'
+            else:
+                orden.estado = 'recibido'  # Pago en efectivo / contra entrega
+
             orden.save()
 
         return Response(self.get_serializer(orden).data, status=status.HTTP_200_OK)
 
     # -----------------------------------------------------------------
-    # 2. ACEPTAR PAGO EN EFECTIVO (Solo Administrador)
+    # 3. ACEPTAR PAGO EN EFECTIVO (Panel de Administrador)
     # URL: POST /api/ordenes/<id>/aceptar/
     # -----------------------------------------------------------------
     @action(detail=True, methods=['POST'], url_path='aceptar')
@@ -270,24 +274,15 @@ class OrdenViewSet(viewsets.ModelViewSet):
 
         orden = self.get_object()
 
-        metodo_pago = getattr(orden, 'metodo_pago', 'efectivo')
-        if str(metodo_pago).lower() != 'efectivo':
-            return Response(
-                {'error': 'Esta acción solo aplica para órdenes con método de pago en efectivo.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        if orden.estado != 'pendiente':
-            return Response(
-                {'error': f'La orden ya fue procesada anteriormente. Estado actual: {orden.estado}'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        # Idempotencia para el Administrador
+        if orden.estado in ['recibido', 'pagado', 'repartiendo', 'entregado']:
+            return Response(self.get_serializer(orden).data, status=status.HTTP_200_OK)
 
         with transaction.atomic():
             for item in orden.items.all():
                 if item.cantidad > item.mezcal.stock:
                     return Response(
-                        {'error': f'Stock insuficiente para {item.mezcal.nombre}. Disponible: {item.mezcal.stock}'},
+                        {'error': f'Stock insuficiente para {item.mezcal.nombre}.'},
                         status=status.HTTP_400_BAD_REQUEST
                     )
                 item.mezcal.stock -= item.cantidad
@@ -296,27 +291,6 @@ class OrdenViewSet(viewsets.ModelViewSet):
             orden.estado = 'recibido'
             orden.save()
 
-        return Response(self.get_serializer(orden).data, status=status.HTTP_200_OK)
-
-    # -----------------------------------------------------------------
-    # 3. RECHAZAR PAGO EN EFECTIVO (Solo Administrador)
-    # URL: POST /api/ordenes/<id>/rechazar/
-    # -----------------------------------------------------------------
-    @action(detail=True, methods=['POST'], url_path='rechazar')
-    def rechazar_efectivo(self, request, pk=None):
-        if getattr(request.user, 'rol', None) != 'administrador':
-            return Response({'detail': 'No autorizado.'}, status=status.HTTP_403_FORBIDDEN)
-
-        orden = self.get_object()
-
-        if orden.estado in ['entregado', 'cancelado']:
-            return Response(
-                {'error': f'No se puede rechazar una orden en estado "{orden.estado}".'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        orden.estado = 'cancelado'
-        orden.save()
         return Response(self.get_serializer(orden).data, status=status.HTTP_200_OK)
 
     # -----------------------------------------------------------------
