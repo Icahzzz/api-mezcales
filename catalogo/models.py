@@ -147,14 +147,20 @@ class CarritoItem(models.Model):
 class Orden(models.Model):
     class Estado(models.TextChoices):
         PENDIENTE = 'pendiente', 'Pendiente'
+        PAGADO = 'pagado', 'Pagado'
         RECIBIDO = 'recibido', 'Recibido'
         REPARTIENDO = 'repartiendo', 'En Reparto'
         ENTREGADO = 'entregado', 'Entregado'
         CANCELADO = 'cancelado', 'Cancelado'
 
+    class MetodoPago(models.TextChoices):
+        EFECTIVO = 'efectivo', 'Efectivo'
+        TARJETA = 'tarjeta', 'Tarjeta'
+
     usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='ordenes')
     total = models.DecimalField(max_digits=10, decimal_places=2)
     estado = models.CharField(max_length=20, choices=Estado.choices, default=Estado.PENDIENTE)
+    metodo_pago = models.CharField(max_length=20, choices=MetodoPago.choices, default=MetodoPago.EFECTIVO)
     creado_en = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
