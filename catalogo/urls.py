@@ -30,8 +30,9 @@ router.register(r'mezcales', MezcalViewSet, basename='admin-mezcal')
 router.register(r'promociones', PromocionViewSet, basename='admin-promocion')
 
 # 2. Gestión de Ventas y Compras
-router.register(r'ordenes', OrdenViewSet, basename='admin-orden')
-router.register(r'carritos', CarritoViewSet, basename='admin-carrito')  # Para monitorear carritos activos/abandonados
+router.register(r'compras', OrdenViewSet, basename='admin-compras')  # <-- Permite /api/compras/
+router.register(r'ordenes', OrdenViewSet, basename='admin-orden')    # <-- Mantiene /api/ordenes/ por si lo usas en otro lado
+router.register(r'carritos', CarritoViewSet, basename='admin-carrito')
 
 # 3. Usuarios y Clientes
 router.register(r'usuarios', UsuarioViewSet, basename='admin-usuario')
@@ -39,7 +40,7 @@ router.register(r'resenas', ResenaViewSet, basename='admin-resena')
 router.register(r'calificaciones', CalificacionViewSet, basename='admin-calificacion')
 
 # 4. Reportes y Métricas
-router.register(r'reportes-ventas', ReporteVentasViewSet, basename='admin-reporte-ventas')
+router.register(r'reporte-ventas', ReporteVentasViewSet, basename='admin-reporte-ventas')  # <-- Permite /api/reporte-ventas/
 
 
 urlpatterns = [
