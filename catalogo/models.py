@@ -125,7 +125,9 @@ class CarritoItem(models.Model):
 class Orden(models.Model):
     class Estado(models.TextChoices):
         PENDIENTE = 'pendiente', 'Pendiente'
-        PAGADO = 'pagado', 'Pagado'
+        RECIBIDO = 'recibido', 'Recibido'
+        REPARTIENDO = 'repartiendo', 'En Reparto'
+        ENTREGADO = 'entregado', 'Entregado'
         CANCELADO = 'cancelado', 'Cancelado'
 
     usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='ordenes')
@@ -135,7 +137,6 @@ class Orden(models.Model):
 
     def __str__(self):
         return f"Orden #{self.id} de {self.usuario.username} ({self.estado})"
-
 
 class OrdenItem(models.Model):
     orden = models.ForeignKey(Orden, on_delete=models.CASCADE, related_name='items')
