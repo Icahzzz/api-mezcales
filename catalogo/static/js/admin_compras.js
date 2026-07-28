@@ -826,3 +826,4 @@ async function loadResenas() {
     target.innerHTML = `<p style="color:var(--danger)">Error al cargar reseñas: ${e.message}</p>`;
   }
 }
+

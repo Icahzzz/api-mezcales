@@ -18,14 +18,14 @@
   <section id="login" class="card">
     <h2>Acceso Administrador POS</h2>
     <p>Inicia sesión con tu cuenta admin para operar el punto de venta.</p>
-    <form id="loginForm" style="grid-template-columns:1fr;">
+    <form id="formLogin" method="POST" style="grid-template-columns:1fr;">
       <div>
         <label>Usuario</label>
-        <input name="username" required />
+        <input name="username" required autocomplete="username" />
       </div>
       <div>
         <label>Contraseña</label>
-        <input name="password" type="password" required />
+        <input name="password" type="password" required autocomplete="current-password" />
       </div>
       <button class="btn primary" type="submit">Entrar</button>
     </form>
@@ -54,7 +54,7 @@
       </div>
 
       <hr style="margin:14px 0; border:none; border-top:1px solid var(--line)">
-      <button id="logoutBtn" class="btn danger" style="width:100%">Cerrar sesión</button>
+      <button id="btnLogout" class="btn danger" style="width:100%">Cerrar sesión</button>
     </aside>
 
     <main>
