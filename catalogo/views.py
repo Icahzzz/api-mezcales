@@ -167,28 +167,41 @@ class OrdenViewSet(viewsets.ModelViewSet):
             return Orden.objects.all().select_related('usuario').order_by('-creado_en')
         return Orden.objects.filter(usuario=user).order_by('-creado_en')
 
-    # -----------------------------------------------------------------
+   # -----------------------------------------------------------------
     # 1. PAGO DE ORDEN DESDE APP MÓVIL
     # URL: POST /api/ordenes/pagar/
     # -----------------------------------------------------------------
     @action(detail=False, methods=['POST'], url_path='pagar')
     def pagar(self, request):
-        orden_id = request.data.get('orden_id') or request.data.get('id') or request.data.get('orden')
+        # 1. Buscar en request.data (JSON body)
+        orden_id = (
+            request.data.get('orden_id') or 
+            request.data.get('id') or 
+            request.data.get('orden')
+        )
+
+        # 2. Si no viene en el body, buscar en query params (?orden_id=X o ?id=X)
+        if not orden_id:
+            orden_id = (
+                request.query_params.get('orden_id') or 
+                request.query_params.get('id') or 
+                request.query_params.get('orden')
+            )
         
         if not orden_id:
             return Response(
-                {'error': 'Se requiere el parámetro "orden_id" o "id" en el cuerpo de la petición.'},
+                {'error': 'Se requiere el parámetro "orden_id" o "id" en el cuerpo de la petición o en la URL.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
-            # Los usuarios normales solo pueden pagar sus propias órdenes; el admin puede procesar cualquier orden
+            # Los usuarios normales solo pueden pagar sus propias órdenes; el admin puede procesar cualquiera
             if getattr(request.user, 'rol', None) == 'administrador':
                 orden = Orden.objects.get(id=orden_id)
             else:
                 orden = Orden.objects.get(id=orden_id, usuario=request.user)
-        except Orden.DoesNotExist:
-            return Response({'error': 'Orden no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+        except (Orden.DoesNotExist, ValueError):
+            return Response({'error': 'Orden no encontrada o ID no válido.'}, status=status.HTTP_404_NOT_FOUND)
 
         if orden.estado != 'pendiente':
             return Response(
