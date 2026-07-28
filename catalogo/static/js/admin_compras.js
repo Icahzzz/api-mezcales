@@ -665,6 +665,8 @@ async function loadUsuarios() {
 async function loadCompras() {
   state.compras = await api(API.compras);
   const target = document.getElementById('view-compras');
+  if (!target) return;
+
   target.innerHTML = `
     <article class="card span-12">
       <h3>Historial de compras y órdenes</h3>
@@ -673,107 +675,132 @@ async function loadCompras() {
   `;
 
   _SR['st-compras'] = () => {
-    const f=ST.filter('st-compras',state.compras,['id','usuario_username'],['estado','metodo_pago']);
-    const pg=ST.page('st-compras',f);
-    document.getElementById('st-compras-wrap').innerHTML = ST.wrap('st-compras',pg,
-      ['ID Órden','Cliente','Fecha','Total','Método Pago','Estado Actual','Acciones de Gestión'],
-      pg.rows.map(o => {
-        const fecha = o.creado_en ? new Date(o.creado_en).toLocaleString('es-MX') : '-';
-        return [
-          `#${o.id}`,
-          o.usuario_username || o.usuario || 'Cliente',
-          fecha,
-          money(o.total),
-          `<strong style="text-transform:uppercase">${o.metodo_pago || 'efectivo'}</strong>`,
-          renderEstadoBadge(o.estado),
-          renderAccionesOrden(o)
-        ];
-      }),
-      [
-        {k:'estado',lbl:'Filtrar Estado',opts:[
-          {v:'pendiente',l:'Pendiente'},{v:'recibido',l:'Recibido'},
-          {v:'repartiendo',l:'Repartiendo'},{v:'entregado',l:'Entregado'},
-          {v:'cancelado',l:'Cancelado'}
-        ]},
-        {k:'metodo_pago',lbl:'Método Pago',opts:[{v:'efectivo',l:'Efectivo'},{v:'tarjeta',l:'Tarjeta'}]}
-      ]
-    );
+    const f = ST.filter('st-compras', state.compras, ['id', 'usuario_username'], ['estado', 'metodo_pago']);
+    const pg = ST.page('st-compras', f);
+    const wrapEl = document.getElementById('st-compras-wrap');
+
+    if (wrapEl) {
+      wrapEl.innerHTML = ST.wrap('st-compras', pg,
+        ['ID Órden', 'Cliente', 'Fecha', 'Total', 'Método Pago', 'Estado Actual', 'Acciones de Gestión'],
+        pg.rows.map(o => {
+          const fecha = o.creado_en || o.fecha ? new Date(o.creado_en || o.fecha).toLocaleString('es-MX') : '-';
+          return [
+            `#${o.id}`,
+            o.usuario_username || o.usuario || 'Cliente',
+            fecha,
+            money(o.total),
+            `<strong style="text-transform:uppercase">${o.metodo_pago || 'efectivo'}</strong>`,
+            renderEstadoBadge(o.estado),
+            renderAccionesOrden(o)
+          ];
+        }),
+        [
+          { 
+            k: 'estado', 
+            lbl: 'Filtrar Estado', 
+            opts: [
+              { v: 'pendiente', l: 'Pendiente' },
+              { v: 'pagado', l: 'Pagado' },
+              { v: 'recibido', l: 'Recibido' },
+              { v: 'repartiendo', l: 'Repartiendo' },
+              { v: 'entregado', l: 'Entregado' },
+              { v: 'cancelado', l: 'Cancelado' }
+            ]
+          },
+          { 
+            k: 'metodo_pago', 
+            lbl: 'Método Pago', 
+            opts: [
+              { v: 'efectivo', l: 'Efectivo' },
+              { v: 'tarjeta', l: 'Tarjeta' }
+            ] 
+          }
+        ]
+      );
+    }
   };
   _SR['st-compras']();
 }
 
-// Helpers para rendering de tabla de Compras
+// Visualizador de insignias (Badges) de estado
 function renderEstadoBadge(estado) {
   const colors = {
     pendiente: 'background:#d9822b;color:white;',
-    recibido: 'background:#2b6cb0;color:white;',
+    pagado: 'background:#2b6cb0;color:white;',
+    recibido: 'background:#319795;color:white;',
     repartiendo: 'background:#805ad5;color:white;',
     entregado: 'background:#2f855a;color:white;',
     cancelado: 'background:#c53030;color:white;'
   };
   const style = colors[estado] || 'background:#718096;color:white;';
-  return `<span style="${style}padding:4px 10px;border-radius:12px;font-size:11px;font-weight:700;text-transform:uppercase;">${estado}</span>`;
+  return `<span style="${style}padding:4px 10px;border-radius:12px;font-size:11px;font-weight:700;text-transform:uppercase;">${estado || 'pendiente'}</span>`;
 }
 
+// Generador de acciones directas (Aceptar, Cancelar y Avance de pedido)
 function renderAccionesOrden(o) {
-  // 1. Si está pendiente y el método de pago es efectivo -> Botones Aceptar y Rechazar
-  if (o.estado === 'pendiente' && (o.metodo_pago || 'efectivo').toLowerCase() === 'efectivo') {
-    return `
-      <div style="display:flex; gap:6px;">
-        <button class="btn success" onclick="aceptarPagoEfectivo(${o.id})">Aceptar Pago</button>
-        <button class="btn danger" onclick="rechazarPagoEfectivo(${o.id})">Rechazar</button>
-      </div>
-    `;
+  const est = o.estado || 'pendiente';
+
+  // Si la orden terminó o se canceló, no hay más acciones
+  if (est === 'cancelado' || est === 'entregado') {
+    return `<span style="font-size:12px;color:var(--muted)">Sin acciones disponibles</span>`;
   }
 
-  // 2. Si ya fue aceptada / está en flujo de envío -> Desplegable de cambio de estado
-  if (['recibido', 'repartiendo', 'entregado'].includes(o.estado)) {
-    return `
-      <select onchange="cambiarEstadoOrden(${o.id}, this.value)" style="padding:4px 8px;font-size:12px;border-radius:4px;">
-        <option value="recibido" ${o.estado === 'recibido' ? 'selected' : ''}>Recibido</option>
-        <option value="repartiendo" ${o.estado === 'repartiendo' ? 'selected' : ''}>Repartiendo</option>
-        <option value="entregado" ${o.estado === 'entregado' ? 'selected' : ''}>Entregado</option>
-        <option value="cancelado">Cancelar Órden</option>
-      </select>
-    `;
-  }
+  return `
+    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+      ${est === 'pendiente' ? `
+        <button class="btn success" onclick="aceptarOrden(${o.id})" style="padding:4px 8px;font-size:11px">Aceptar</button>
+      ` : ''}
 
-  return `<span style="font-size:12px;color:var(--muted)">Sin acciones disponibles</span>`;
+      ${['pagado', 'recibido'].includes(est) ? `
+        <button class="btn primary" onclick="cambiarEstadoOrden(${o.id}, 'repartiendo')" style="padding:4px 8px;font-size:11px">Repartiendo</button>
+      ` : ''}
+
+      ${est === 'repartiendo' ? `
+        <button class="btn success" onclick="cambiarEstadoOrden(${o.id}, 'entregado')" style="padding:4px 8px;font-size:11px">Entregado</button>
+      ` : ''}
+
+      <button class="btn danger" onclick="cancelarOrden(${o.id})" style="padding:4px 8px;font-size:11px">Cancelar</button>
+    </div>
+  `;
 }
 
-// Funciones globales de interacción para Compras
-window.aceptarPagoEfectivo = async function(ordenId) {
-  if (!confirm('¿Confirmas que recibiste el pago en efectivo para esta orden? Se descontará el inventario automáticamente.')) return;
+// ================= FUNCIONES DE INTERACCIÓN =================
+
+window.aceptarOrden = async function(id) {
+  if (!confirm(`¿Confirmas aceptar la orden #${id}?`)) return;
   try {
-    await api(`${API.compras}${ordenId}/aceptar/`, { method: 'POST' });
-    alert('¡Pago aceptado con éxito! La orden pasa a estado RECIBIDO.');
+    await api(`${API.compras}${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify({ estado: 'pagado' })
+    });
     await loadCompras();
   } catch(e) {
-    alert('Error al aceptar el pago: ' + e.message);
+    alert('Error al aceptar la orden: ' + e.message);
   }
 };
 
-window.rechazarPagoEfectivo = async function(ordenId) {
-  if (!confirm('¿Deseas rechazar esta orden? El estado cambiará a CANCELADO.')) return;
+window.cancelarOrden = async function(id) {
+  if (!confirm(`¿Estás seguro de cancelar la orden #${id}?`)) return;
   try {
-    await api(`${API.compras}${ordenId}/rechazar/`, { method: 'POST' });
-    alert('La orden ha sido rechazada y cancelada.');
+    await api(`${API.compras}${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify({ estado: 'cancelado' })
+    });
     await loadCompras();
   } catch(e) {
-    alert('Error al rechazar la orden: ' + e.message);
+    alert('Error al cancelar la orden: ' + e.message);
   }
 };
 
-window.cambiarEstadoOrden = async function(ordenId, nuevoEstado) {
+window.cambiarEstadoOrden = async function(id, nuevoEstado) {
   try {
-    await api(`${API.compras}${ordenId}/`, {
+    await api(`${API.compras}${id}/`, {
       method: 'PATCH',
       body: JSON.stringify({ estado: nuevoEstado })
     });
-    alert(`Estado actualizado a ${nuevoEstado.toUpperCase()}`);
     await loadCompras();
   } catch(e) {
-    alert('Error al cambiar estado: ' + e.message);
+    alert('Error al actualizar la orden: ' + e.message);
   }
 };
 
