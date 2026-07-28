@@ -168,8 +168,54 @@ class OrdenViewSet(viewsets.ModelViewSet):
         return Orden.objects.filter(usuario=user).order_by('-creado_en')
 
     # -----------------------------------------------------------------
-    # 1. ACEPTAR PAGO EN EFECTIVO (Solo Administrador)
-    # URL: POST /api/compras/<id>/aceptar/
+    # 1. PAGO DE ORDEN DESDE APP MÓVIL
+    # URL: POST /api/ordenes/pagar/
+    # -----------------------------------------------------------------
+    @action(detail=False, methods=['POST'], url_path='pagar')
+    def pagar(self, request):
+        orden_id = request.data.get('orden_id') or request.data.get('id') or request.data.get('orden')
+        
+        if not orden_id:
+            return Response(
+                {'error': 'Se requiere el parámetro "orden_id" o "id" en el cuerpo de la petición.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Los usuarios normales solo pueden pagar sus propias órdenes; el admin puede procesar cualquier orden
+            if getattr(request.user, 'rol', None) == 'administrador':
+                orden = Orden.objects.get(id=orden_id)
+            else:
+                orden = Orden.objects.get(id=orden_id, usuario=request.user)
+        except Orden.DoesNotExist:
+            return Response({'error': 'Orden no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if orden.estado != 'pendiente':
+            return Response(
+                {'error': f'La orden ya se encuentra en estado "{orden.estado}".'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        with transaction.atomic():
+            # Verificar y descontar el inventario de cada mezcal en la orden
+            for item in orden.items.all():
+                if item.cantidad > item.mezcal.stock:
+                    return Response(
+                        {'error': f'Stock insuficiente para {item.mezcal.nombre}. Disponible: {item.mezcal.stock}'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                item.mezcal.stock -= item.cantidad
+                item.mezcal.save()
+
+            # Transición de estado a recibido para comenzar el proceso logístico
+            orden.estado = 'recibido'
+            orden.save()
+
+        return Response(self.get_serializer(orden).data, status=status.HTTP_200_OK)
+
+    # -----------------------------------------------------------------
+    # 2. ACEPTAR PAGO EN EFECTIVO (Solo Administrador)
+    # URL: POST /api/compras/<id>/aceptar/ o /api/ordenes/<id>/aceptar/
     # -----------------------------------------------------------------
     @action(detail=True, methods=['POST'], url_path='aceptar')
     def aceptar_efectivo(self, request, pk=None):
@@ -204,15 +250,14 @@ class OrdenViewSet(viewsets.ModelViewSet):
                 item.mezcal.stock -= item.cantidad
                 item.mezcal.save()
 
-            # Pasa el estado a "recibido" (o "pagado") para iniciar logística
             orden.estado = 'recibido'
             orden.save()
 
         return Response(self.get_serializer(orden).data, status=status.HTTP_200_OK)
 
     # -----------------------------------------------------------------
-    # 2. RECHAZAR PAGO EN EFECTIVO (Solo Administrador)
-    # URL: POST /api/compras/<id>/rechazar/
+    # 3. RECHAZAR PAGO EN EFECTIVO (Solo Administrador)
+    # URL: POST /api/compras/<id>/rechazar/ o /api/ordenes/<id>/rechazar/
     # -----------------------------------------------------------------
     @action(detail=True, methods=['POST'], url_path='rechazar')
     def rechazar_efectivo(self, request, pk=None):
@@ -233,7 +278,7 @@ class OrdenViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(orden).data, status=status.HTTP_200_OK)
 
     # -----------------------------------------------------------------
-    # 3. CAMBIO DE ESTADOS GENERALES / PATCH (Recibido -> Repartiendo -> Entregado)
+    # 4. CAMBIO DE ESTADOS GENERALES / PATCH (Recibido -> Repartiendo -> Entregado)
     # -----------------------------------------------------------------
     def partial_update(self, request, *args, **kwargs):
         user = request.user
@@ -276,6 +321,10 @@ class OrdenViewSet(viewsets.ModelViewSet):
 
         return Response(OrdenSerializer(instance).data, status=status.HTTP_200_OK)
 
+    # -----------------------------------------------------------------
+    # 5. CREACIÓN DE ÓRDENES
+    # URL: POST /api/ordenes/crear-orden/
+    # -----------------------------------------------------------------
     @action(detail=False, methods=['POST'], url_path='crear-orden')
     def crear_orden(self, request):
         try:
@@ -312,6 +361,10 @@ class OrdenViewSet(viewsets.ModelViewSet):
 
         return Response(self.get_serializer(orden).data, status=status.HTTP_201_CREATED)
 
+    # -----------------------------------------------------------------
+    # 6. CANCELACIÓN DE ÓRDENES
+    # URL: POST /api/ordenes/<id>/cancelar/
+    # -----------------------------------------------------------------
     @action(detail=True, methods=['POST'], url_path='cancelar')
     def cancelar(self, request, pk=None):
         orden = self.get_object()
