@@ -123,6 +123,32 @@ class CarritoViewSet(viewsets.ModelViewSet):
         carrito, _ = Carrito.objects.get_or_create(usuario=request.user)
         return Response(self.get_serializer(carrito).data)
 
+    # -----------------------------------------------------------------
+    # ACCIÓN SINCRONIZAR (Soporte para App Móvil / Cliente)
+    # URL: POST /api/carritos/sincronizar/ o /api/carrito/sincronizar/
+    # -----------------------------------------------------------------
+    @action(detail=False, methods=["POST"], url_path="sincronizar")
+    def sincronizar(self, request):
+        carrito, _ = Carrito.objects.get_or_create(usuario=request.user)
+        items_data = request.data.get("items", [])
+
+        with transaction.atomic():
+            for item_data in items_data:
+                mezcal_id = item_data.get("mezcal") or item_data.get("mezcal_id")
+                cantidad = int(item_data.get("cantidad", 1))
+
+                if mezcal_id:
+                    item, creado = CarritoItem.objects.get_or_create(
+                        carrito=carrito,
+                        mezcal_id=mezcal_id,
+                        defaults={"cantidad": cantidad}
+                    )
+                    if not creado:
+                        item.cantidad = cantidad
+                        item.save()
+
+        return Response(self.get_serializer(carrito).data, status=status.HTTP_200_OK)
+
 
 # =====================================================
 # ÓRDENES (GESTIÓN COMPLETA + EFECTIVO Y ESTADOS)
@@ -295,6 +321,7 @@ class OrdenViewSet(viewsets.ModelViewSet):
         orden.estado = 'cancelado'
         orden.save()
         return Response(self.get_serializer(orden).data, status=status.HTTP_200_OK)
+
 
 # =====================================================
 # OTROS ENDPOINTS (REGISTRO, USUARIOS, REPORTES, PERFIL)
