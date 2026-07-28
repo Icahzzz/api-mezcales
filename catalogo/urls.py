@@ -1,27 +1,29 @@
-from rest_framework.routers import DefaultRouter
 from django.urls import path
-from .views import (
-    CategoriaViewSet,
-    MezcalViewSet,
-    PromocionViewSet,
-    ResenaViewSet,
-    CalificacionViewSet,
-    CarritoViewSet,
-    OrdenViewSet,
-    UsuarioViewSet,
-    ReporteVentasViewSet,
-    RegistroView,
-)
+from rest_framework.routers import DefaultRouter
+
 from .ia_views import (
     chatbot_view,
-    sugerencias_view,
     personalizacion_view,
     recomendaciones_view,
+    sugerencias_view,
+)
+from .views import (
+    CalificacionViewSet,
+    CarritoViewSet,
+    CategoriaViewSet,
+    MezcalViewSet,
+    OrdenViewSet,
+    PromocionViewSet,
+    RegistroView,
+    ReporteVentasViewSet,
+    ResenaViewSet,
+    UsuarioViewSet,
+    me_view,
 )
 
 router = DefaultRouter()
 
-# Catalogo
+# Catálogo
 router.register(r'categorias', CategoriaViewSet, basename='categoria')
 router.register(r'mezcales', MezcalViewSet, basename='mezcal')
 router.register(r'promociones', PromocionViewSet, basename='promocion')
@@ -34,12 +36,13 @@ router.register(r'calificaciones', CalificacionViewSet, basename='calificacion')
 router.register(r'carrito', CarritoViewSet, basename='carrito')
 router.register(r'ordenes', OrdenViewSet, basename='orden')
 
-# Administracion
+# Administración
 router.register(r'usuarios', UsuarioViewSet, basename='usuario')
 router.register(r'reporte-ventas', ReporteVentasViewSet, basename='reporte-ventas')
 
 urlpatterns = router.urls + [
     path('registro/', RegistroView.as_view(), name='registro'),
+    path('me/', me_view, name='me'),
 
     # IA
     path('ia/chat/', chatbot_view, name='ia-chat'),

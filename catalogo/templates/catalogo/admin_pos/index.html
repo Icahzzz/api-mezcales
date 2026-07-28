@@ -144,6 +144,7 @@
       border-bottom: 1px solid #e2cebc;
       padding: 10px 12px;
       text-align: left;
+      vertical-align: middle;
     }
     tr:hover td { background: rgba(194,153,91,0.07); }
     th {
@@ -226,7 +227,7 @@
     }
     .btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
     .btn:active { transform: translateY(0); filter: brightness(0.97); }
-    .hidden { display: none; }
+    .hidden { display: none !important; }
     
     #login {
       max-width: 430px;
@@ -323,11 +324,7 @@
       cursor: pointer; font-size: 16px;
       display: flex; align-items: center; justify-content: center;
     }
-    /* ==== IA Panel ==== */
-    .ia-card { background: #fdf7ee; border: 1px solid #d4b896; border-radius: 6px; padding: 16px; }
-    .ia-placeholder { text-align: center; padding: 36px 16px; color: var(--muted); }
-    .ia-placeholder .ia-icon { font-size: 44px; margin-bottom: 10px; }
-    .ia-alta { color: #8d2f24; } .ia-media { color: #8a5c2f; } .ia-baja { color: #4a6b3c; }
+    .img-thumb { width: 42px; height: 42px; object-fit: cover; border-radius: 4px; border: 1px solid #d4b896; }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 </head>
@@ -352,21 +349,21 @@
   <div id="app" class="layout hidden">
     <aside>
       <div class="brand" style="display:flex; flex-direction:column; align-items:center; text-align:center;">
-  <img src="{% static 'catalogo/img/logo.png' %}" alt="Mezcal POS" style="height:180px">
-  <div style="margin-top:10px; line-height:1.3;">
-    <div style="font-size:16px; letter-spacing:1px;">Administrador</div>
-    <div style="font-size:22px; color:var(--accent); font-weight:700;">Mezcales</div>
-  </div>
-</div>
+        <img src="{% static 'catalogo/img/logo.png' %}" alt="Mezcal POS" style="height:180px" onerror="this.style.display='none'">
+        <div style="margin-top:10px; line-height:1.3;">
+          <div style="font-size:16px; letter-spacing:1px;">Administrador</div>
+          <div style="font-size:22px; color:var(--accent); font-weight:700;">Mezcales</div>
+        </div>
+      </div>
       <div class="menu">
-  <button data-view="reporte" class="active">Reporte de ventas</button>
-  <button data-view="catalogos">Catalogos</button>
-  <button data-view="articulos">Articulos</button>
-  <button data-view="promociones">Promociones</button>
-  <button data-view="usuarios">Usuarios</button>
-  <button data-view="compras">Compras</button>
-  <button data-view="resenas">Reseñas</button>
-</div>
+        <button data-view="reporte" class="active">Reporte de ventas</button>
+        <button data-view="catalogos">Categorías</button>
+        <button data-view="articulos">Artículos</button>
+        <button data-view="promociones">Promociones</button>
+        <button data-view="usuarios">Usuarios</button>
+        <button data-view="compras">Compras</button>
+        <button data-view="resenas">Reseñas</button>
+      </div>
       <hr style="margin:14px 0; border:none; border-top:1px solid var(--line)">
       <button id="logoutBtn" class="btn danger" style="width:100%">Cerrar sesión</button>
     </aside>
@@ -386,6 +383,22 @@
     </main>
   </div>
 
+  <!-- Chatbot Widget -->
+  <button id="chatBtn" title="Asistente de IA">💬</button>
+  <div id="chatPanel" class="hidden">
+    <div class="chat-header">
+      <span>Asistente POS Mezcales</span>
+      <button class="chat-header-close" id="chatCloseBtn">&times;</button>
+    </div>
+    <div id="chatMessages">
+      <div class="chat-msg chat-msg-bot">¡Hola! Soy tu asistente POS. ¿En qué puedo ayudarte hoy con el inventario o ventas?</div>
+    </div>
+    <div class="chat-input-wrap">
+      <input type="text" id="chatInput" placeholder="Escribe tu consulta..." />
+      <button class="chat-send-btn" id="chatSendBtn">➔</button>
+    </div>
+  </div>
+
 <script>
 const state = {
   token: localStorage.getItem('admin_pos_token') || '',
@@ -393,7 +406,9 @@ const state = {
   categorias: [],
   mezcales: [],
   promociones: [],
-  usuarios: []
+  usuarios: [],
+  compras: [],
+  resenas: []
 };
 
 const API = {
@@ -403,7 +418,9 @@ const API = {
   mezcales: '/api/mezcales/',
   promociones: '/api/promociones/',
   usuarios: '/api/usuarios/',
-  resenas: '/api/resenas/'
+  compras: '/api/compras/',
+  resenas: '/api/resenas/',
+  chatbot: '/api/chatbot/'
 };
 
 function money(n) {
@@ -420,7 +437,6 @@ async function api(url, options = {}, _retry = false) {
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
   const res = await fetch(url, { ...options, headers });
 
-  // Token expirado: intentar refresh automático
   if (res.status === 401 && !_retry && state.refresh) {
     try {
       const rr = await fetch('/api/token/refresh/', {
@@ -431,7 +447,7 @@ async function api(url, options = {}, _retry = false) {
       if (rr.ok) {
         const d = await rr.json();
         setAuth(d.access, state.refresh);
-        return api(url, options, true);  // reintentar con el token nuevo
+        return api(url, options, true);
       }
     } catch (_) {}
     logout();
@@ -466,86 +482,106 @@ function showView(name) {
   });
   const titles = {
     reporte: 'Reporte de ventas',
-    catalogos: 'Catalogos',
-    articulos: 'Articulos',
+    catalogos: 'Categorías',
+    articulos: 'Artículos',
     promociones: 'Promociones',
     usuarios: 'Usuarios',
-    compras: 'Compras',
-    resenas: 'Reseñas'
+    compras: 'Historial de Compras',
+    resenas: 'Reseñas y Valoraciones'
   };
-  document.getElementById('viewTitle').textContent = titles[name];
+  document.getElementById('viewTitle').textContent = titles[name] || 'Administración';
+  
+  // Cargar datos según la vista
+  if(name==='reporte') loadReporte();
+  if(name==='catalogos') loadCatalogos();
+  if(name==='articulos') loadArticulos();
+  if(name==='promociones') loadPromociones();
+  if(name==='usuarios') loadUsuarios();
+  if(name==='compras') loadCompras();
+  if(name==='resenas') loadResenas();
 }
 
 async function loadReporte() {
   const target = document.getElementById('view-reporte');
-  const data = await api(API.reporte);
-  target.innerHTML = `
-    <article class="card span-4 kpi"><h3>Total ventas</h3><p>${money(data.kpis.total_ventas)}</p></article>
-    <article class="card span-4 kpi"><h3>Total ordenes</h3><p>${data.kpis.total_ordenes}</p></article>
-    <article class="card span-4 kpi"><h3>Ticket promedio</h3><p>${money(data.kpis.ticket_promedio)}</p></article>
-    <article class="card span-6">
-      <h3>Productos mas vendidos</h3>
-      <canvas id="chartProductos" style="max-height:260px"></canvas>
-    </article>
-    <article class="card span-6">
-      <h3>Clientes que mas compran</h3>
-      <canvas id="chartClientes" style="max-height:260px"></canvas>
-    </article>
-    <article class="card span-12">
-      <h3>Productos mejor valorados</h3>
-      <canvas id="chartValorados" style="max-height:260px"></canvas>
-    </article>
-  `;
-  const PALETTE = ['#5d3f2b','#8a6441','#c2995b','#d4b896','#e8d5b8','#3b271b','#9b7a54','#b89170'];
+  target.innerHTML = '<p>Cargando reporte...</p>';
+  try {
+    const data = await api(API.reporte);
+    target.innerHTML = `
+      <article class="card span-4 kpi"><h3>Total ventas</h3><p>${money(data.kpis?.total_ventas)}</p></article>
+      <article class="card span-4 kpi"><h3>Total órdenes</h3><p>${data.kpis?.total_ordenes || 0}</p></article>
+      <article class="card span-4 kpi"><h3>Ticket promedio</h3><p>${money(data.kpis?.ticket_promedio)}</p></article>
+      <article class="card span-6">
+        <h3>Productos más vendidos</h3>
+        <canvas id="chartProductos" style="max-height:260px"></canvas>
+      </article>
+      <article class="card span-6">
+        <h3>Clientes que más compran</h3>
+        <canvas id="chartClientes" style="max-height:260px"></canvas>
+      </article>
+      <article class="card span-12">
+        <h3>Productos mejor valorados</h3>
+        <canvas id="chartValorados" style="max-height:260px"></canvas>
+      </article>
+    `;
+    const PALETTE = ['#5d3f2b','#8a6441','#c2995b','#d4b896','#e8d5b8','#3b271b','#9b7a54','#b89170'];
 
-  new Chart(document.getElementById('chartProductos'), {
-    type: 'bar',
-    data: {
-      labels: data.top_articulos.length ? data.top_articulos.map(x => x.mezcal__nombre || 'Sin nombre') : ['Sin datos'],
-      datasets: [{ label: 'Unidades vendidas',
-        data: data.top_articulos.length ? data.top_articulos.map(x => x.cantidad_vendida) : [0],
-        backgroundColor: PALETTE, borderRadius: 5, borderSkipped: false }]
-    },
-    options: { indexAxis: 'y', responsive: true,
-      plugins: { legend: { display: false } },
-      scales: { x: { beginAtZero: true, grid: { color: '#ede0cc' } }, y: { grid: { display: false } } }
+    if (document.getElementById('chartProductos')) {
+      new Chart(document.getElementById('chartProductos'), {
+        type: 'bar',
+        data: {
+          labels: data.top_articulos?.length ? data.top_articulos.map(x => x.mezcal__nombre || 'Sin nombre') : ['Sin datos'],
+          datasets: [{ label: 'Unidades vendidas',
+            data: data.top_articulos?.length ? data.top_articulos.map(x => x.cantidad_vendida) : [0],
+            backgroundColor: PALETTE, borderRadius: 5, borderSkipped: false }]
+        },
+        options: { indexAxis: 'y', responsive: true,
+          plugins: { legend: { display: false } },
+          scales: { x: { beginAtZero: true, grid: { color: '#ede0cc' } }, y: { grid: { display: false } } }
+        }
+      });
     }
-  });
 
-  new Chart(document.getElementById('chartClientes'), {
-    type: 'doughnut',
-    data: {
-      labels: data.ventas_por_usuario.length ? data.ventas_por_usuario.map(x => x.usuario__username) : ['Sin datos'],
-      datasets: [{ data: data.ventas_por_usuario.length ? data.ventas_por_usuario.map(x => Number(x.total_gastado)) : [1],
-        backgroundColor: data.ventas_por_usuario.length ? PALETTE : ['#d8c7b2'], borderWidth: 2, borderColor: '#f7f2e7' }]
-    },
-    options: { responsive: true,
-      plugins: {
-        legend: { position: 'right', labels: { font: { family: 'Georgia, serif', size: 12 }, color: '#3b271b', padding: 14 } },
-        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${money(ctx.raw)}` } }
-      }
+    if (document.getElementById('chartClientes')) {
+      new Chart(document.getElementById('chartClientes'), {
+        type: 'doughnut',
+        data: {
+          labels: data.ventas_por_usuario?.length ? data.ventas_por_usuario.map(x => x.usuario__username) : ['Sin datos'],
+          datasets: [{ data: data.ventas_por_usuario?.length ? data.ventas_por_usuario.map(x => Number(x.total_gastado)) : [1],
+            backgroundColor: data.ventas_por_usuario?.length ? PALETTE : ['#d8c7b2'], borderWidth: 2, borderColor: '#f7f2e7' }]
+        },
+        options: { responsive: true,
+          plugins: {
+            legend: { position: 'right', labels: { font: { family: 'Georgia, serif', size: 12 }, color: '#3b271b', padding: 14 } },
+            tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${money(ctx.raw)}` } }
+          }
+        }
+      });
     }
-  });
 
-  const valorados = data.productos_valorados || [];
-  new Chart(document.getElementById('chartValorados'), {
-    type: 'bar',
-    data: {
-      labels: valorados.length ? valorados.map(x => x.nombre) : ['Sin datos'],
-      datasets: [{ label: 'Calificacion promedio',
-        data: valorados.length ? valorados.map(x => Number(x.promedio).toFixed(2)) : [0],
-        backgroundColor: PALETTE, borderRadius: 5, borderSkipped: false }]
-    },
-    options: { responsive: true,
-      plugins: { legend: { display: false },
-        tooltip: { callbacks: { label: ctx => {
-          const item = valorados[ctx.dataIndex];
-          return item ? ` ${ctx.raw} / 5 (${item.num_calificaciones} reseñas)` : 'Sin datos';
-        }}}
-      },
-      scales: { y: { beginAtZero: true, max: 5, grid: { color: '#ede0cc' } }, x: { grid: { display: false } } }
+    const valorados = data.productos_valorados || [];
+    if (document.getElementById('chartValorados')) {
+      new Chart(document.getElementById('chartValorados'), {
+        type: 'bar',
+        data: {
+          labels: valorados.length ? valorados.map(x => x.nombre) : ['Sin datos'],
+          datasets: [{ label: 'Calificación promedio',
+            data: valorados.length ? valorados.map(x => Number(x.promedio).toFixed(2)) : [0],
+            backgroundColor: PALETTE, borderRadius: 5, borderSkipped: false }]
+        },
+        options: { responsive: true,
+          plugins: { legend: { display: false },
+            tooltip: { callbacks: { label: ctx => {
+              const item = valorados[ctx.dataIndex];
+              return item ? ` ${ctx.raw} / 5 (${item.num_calificaciones} reseñas)` : 'Sin datos';
+            }}}
+          },
+          scales: { y: { beginAtZero: true, max: 5, grid: { color: '#ede0cc' } }, x: { grid: { display: false } } }
+        }
+      });
     }
-  });
+  } catch(e) {
+    target.innerHTML = `<p style="color:var(--danger)">Error al cargar reporte: ${e.message}</p>`;
+  }
 }
 
 function renderTable(headers, rows) {
@@ -553,13 +589,13 @@ function renderTable(headers, rows) {
   return `<table><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(c => `<td>${c ?? ''}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 }
 
-// ===== Smart Table: búsqueda · filtros · paginación =====
+// ===== Smart Table Helper =====
 const _n=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
 const ST = {
   PER: 10, _s: {},
   g(id) { if(!this._s[id]) this._s[id]={page:1,q:''}; return this._s[id]; },
   filter(id, data, sFields, fKeys=[]) {
-    const s=this.g(id); let r=data;
+    const s=this.g(id); let r=data || [];
     if(s.q){const q=_n(s.q); r=r.filter(row=>sFields.some(f=>_n(row[f]).includes(q)));}
     fKeys.forEach(k=>{const v=s['f_'+k]; if(v!==undefined&&v!=='') r=r.filter(row=>String(row[k])===v);});
     return r;
@@ -581,10 +617,10 @@ const ST = {
         style="border:1px solid ${a?'transparent':'#d4b896'};background:${a?'linear-gradient(135deg,#5d3f2b,#8a6441)':'white'};color:${a?'white':'#5a4030'};border-radius:6px;padding:5px 11px;cursor:pointer;font-size:13px;font-weight:${a?700:400}">${n}</button>`;
     }).join(''):'';
     return `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-      <input class="st-q" data-id="${id}" value="${s.q||''}" placeholder="&#128269;  Buscar..."
+      <input class="st-q" data-id="${id}" value="${s.q||''}" placeholder="🔍  Buscar..."
         style="flex:1;min-width:180px;border:1px solid #c9a882;border-radius:20px;padding:8px 16px;background:#fdf8f1;font-size:13px">
       ${fh}
-      <span style="font-size:12px;color:var(--muted);white-space:nowrap;margin-left:auto">${pg.count?`${pg.from}&#8211;${pg.to} de <strong>${pg.count}</strong>`:'Sin resultados'}</span>
+      <span style="font-size:12px;color:var(--muted);white-space:nowrap;margin-left:auto">${pg.count?`${pg.from}–${pg.to} de <strong>${pg.count}</strong>`:'Sin resultados'}</span>
     </div>
     ${renderTable(headers, rows)}
     ${pg.tot>1?`<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:12px;align-items:center"><span style="font-size:12px;color:var(--muted);margin-right:2px">Página:</span>${pgs}</div>`:''}`;
@@ -592,18 +628,19 @@ const ST = {
 };
 const _SR={};
 const _EDIT={},_CRUD_EDIT={},_CRUD_DEL={};
-function actBtns(sec,id,nm){return `<div style="display:flex;gap:4px;white-space:nowrap"><button class="crud-edit btn" data-sec="${sec}" data-id="${id}" style="padding:3px 10px;font-size:11px;background:linear-gradient(135deg,#5d6b3f,#7a8a52);color:white">&#9998; Editar</button> <button class="crud-del btn danger" data-sec="${sec}" data-id="${id}" data-nm="${String(nm).replace(/"/g,'&quot;')}" style="padding:3px 10px;font-size:11px">&#10005; Borrar</button></div>`;}
-function activoBadge(val,type,id,field){
+function actBtns(sec,id,nm){return `<div style="display:flex;gap:4px;white-space:nowrap"><button class="crud-edit btn" data-sec="${sec}" data-id="${id}" style="padding:3px 10px;font-size:11px;background:linear-gradient(135deg,#5d6b3f,#7a8a52);color:white">✏ Editar</button> <button class="crud-del btn danger" data-sec="${sec}" data-id="${id}" data-nm="${String(nm).replace(/"/g,'&quot;')}" style="padding:3px 10px;font-size:11px">✕ Borrar</button></div>`;}
+function activoBadge(val,type,id,field='activo'){
   const bg=val?'#4a6b3c':'#8d6a52';
   return `<button onclick="_tact('${type}',${id},${!val},'${field}')" title="${val?'Clic para desactivar':'Clic para activar'}"
     style="background:${bg};color:white;border:none;border-radius:10px;padding:3px 13px;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.3px"
     onmouseover="this.style.filter='brightness(1.12)'" onmouseout="this.style.filter=''"
-  >${val?'&#10003; Activo':'&#215; Inactivo'}</button>`;}
+  >${val?'✓ Activo':'✕ Inactivo'}</button>`;
+}
+
 window._tact = async (type,id,newVal,field) => {
   const ep={cats:API.categorias,arts:API.mezcales,proms:API.promociones,usrs:API.usuarios};
   const sk={cats:'categorias',arts:'mezcales',proms:'promociones',usrs:'usuarios'};
 
-  // Al desactivar una categoría: ofrecer cascada a sus artículos
   if (type === 'cats' && newVal === false) {
     const activos = state.mezcales.filter(m => m.categoria === id && m.activo);
     if (activos.length > 0) {
@@ -630,7 +667,6 @@ window._tact = async (type,id,newVal,field) => {
     }
   }
 
-  // Al reactivar una categoría: ofrecer reactivar sus artículos inactivos
   if (type === 'cats' && newVal === true) {
     const inactivos = state.mezcales.filter(m => m.categoria === id && !m.activo);
     if (inactivos.length > 0) {
@@ -657,7 +693,6 @@ window._tact = async (type,id,newVal,field) => {
     }
   }
 
-  // Bloquear activación de artículo si su categoría está inactiva
   if (type === 'arts' && newVal === true) {
     const art = state.mezcales.find(x => x.id === id);
     if (art?.categoria) {
@@ -669,11 +704,10 @@ window._tact = async (type,id,newVal,field) => {
     }
   }
 
-  // Comportamiento genérico para todos los demás campos
   try{
     await api(`${ep[type]}${id}/`,{method:'PATCH',body:JSON.stringify({[field]:newVal})});
     const item=state[sk[type]]?.find(x=>x.id===id);
-    if(item)item[field]=newVal;
+    if(item) item[field]=newVal;
     _SR['st-'+type]?.();
     if(type==='cats') _refreshCatSelect();
   }catch(e){alert('Error al cambiar estado: '+e.message);}
@@ -683,28 +717,37 @@ function _refreshCatSelect() {
   const sel = document.querySelector('#formMezcal [name=categoria]');
   if (!sel) return;
   const current = sel.value;
-  sel.innerHTML = `<option value="">Sin categoria</option>` +
+  sel.innerHTML = `<option value="">Sin categoría</option>` +
     state.categorias.filter(c => c.activo)
       .map(c => `<option value="${c.id}"${String(c.id)===String(current)?' selected':''}>${c.nombre}</option>`)
       .join('');
 }
+
 document.addEventListener('click',e=>{
   if(e.target.classList.contains('crud-edit')){const{sec,id}=e.target.dataset;_CRUD_EDIT[sec]?.(+id);}
-  if(e.target.classList.contains('crud-del')){const{sec,id,nm}=e.target.dataset;if(confirm('\u00bfEliminar "'+nm+'"?\nEsta acci\u00f3n no se puede deshacer.'))_CRUD_DEL[sec]?.(+id);}
+  if(e.target.classList.contains('crud-del')){const{sec,id,nm}=e.target.dataset;if(confirm(`¿Eliminar "${nm}"?\nEsta acción no se puede deshacer.`))_CRUD_DEL[sec]?.(+id);}
 });
+
 function _eMode(fid,tid,key){
   const form=document.getElementById(fid);if(!form)return;
   form.querySelector('[type=submit]').textContent='Actualizar';
-  const tEl=tid?document.getElementById(tid):null; if(tEl)tEl.textContent='Editar';
+  const tEl=tid?document.getElementById(tid):null; if(tEl)tEl.textContent='Editar registro';
   if(!form.querySelector('.crud-cancel')){
     const b=document.createElement('button');b.type='button';b.className='btn crud-cancel';b.textContent='Cancelar';
     b.style.cssText='background:#7a6a5d;color:white;margin-left:8px';
-    const labels={cats:'Nueva categoria',arts:'Nuevo articulo (mezcal)',proms:'Nueva promocion',usrs:'Nuevo usuario'};
-    b.onclick=()=>{delete _EDIT[key];form.reset();form.querySelector('[type=submit]').textContent='Guardar';if(tEl)tEl.textContent=labels[key]||'Nuevo';b.remove();};
+    const labels={cats:'Nueva categoría',arts:'Nuevo artículo (mezcal)',proms:'Nueva promoción',usrs:'Nuevo usuario'};
+    b.onclick=()=>{
+      delete _EDIT[key];
+      form.reset();
+      form.querySelector('[type=submit]').textContent='Guardar';
+      if(tEl)tEl.textContent=labels[key]||'Nuevo';
+      b.remove();
+    };
     form.querySelector('.actions').appendChild(b);
   }
   form.scrollIntoView({behavior:'smooth',block:'start'});
 }
+
 document.addEventListener('input',e=>{
   if(!e.target.classList.contains('st-q'))return;
   const id=e.target.dataset.id;
@@ -717,23 +760,23 @@ document.addEventListener('input',e=>{
 });
 document.addEventListener('change',e=>{if(!e.target.classList.contains('st-f'))return;const id=e.target.dataset.id,k=e.target.dataset.k;ST._s[id]={...ST.g(id),['f_'+k]:e.target.value,page:1};_SR[id]?.();});
 document.addEventListener('click',e=>{if(!e.target.classList.contains('st-pg'))return;const id=e.target.dataset.id;ST._s[id]={...ST.g(id),page:Number(e.target.dataset.p)};_SR[id]?.();});
-// ==================================================
 
+// ================= VISTA CATEGORIAS =================
 async function loadCatalogos() {
   state.categorias = await api(API.categorias);
   const target = document.getElementById('view-catalogos');
   target.innerHTML = `
     <article class="card span-12">
-      <h3 id="cats-form-title">Nueva categoria</h3>
+      <h3 id="cats-form-title">Nueva categoría</h3>
       <form id="formCategoria">
         <div class="field"><label>Nombre</label><input name="nombre" required></div>
-        <div class="field"><label>Activo</label><select name="activo"><option value="true">Si</option><option value="false">No</option></select></div>
-        <div class="field full"><label>Descripcion</label><textarea name="descripcion"></textarea></div>
+        <div class="field"><label>Activo</label><select name="activo"><option value="true">Sí</option><option value="false">No</option></select></div>
+        <div class="field full"><label>Descripción</label><textarea name="descripcion"></textarea></div>
         <div class="field full actions"><button class="btn primary" type="submit">Guardar</button></div>
       </form>
     </article>
     <article class="card span-12">
-      <h3>Catalogo de categorias</h3>
+      <h3>Catálogo de categorías</h3>
       <div id="st-cats-wrap"></div>
     </article>
   `;
@@ -741,7 +784,7 @@ async function loadCatalogos() {
     const f=ST.filter('st-cats',state.categorias,['nombre','descripcion'],['activo']);
     const pg=ST.page('st-cats',f);
     document.getElementById('st-cats-wrap').innerHTML = ST.wrap('st-cats',pg,
-      ['ID','Nombre','Activo','Descripcion','Acciones'],
+      ['ID','Nombre','Activo','Descripción','Acciones'],
       pg.rows.map(c=>[c.id,c.nombre,activoBadge(c.activo,'cats',c.id,'activo'),c.descripcion||'',actBtns('cats',c.id,c.nombre)]),
       [{k:'activo',lbl:'Estado',opts:[{v:'true',l:'Activos'},{v:'false',l:'Inactivos'}]}]
     );
@@ -765,169 +808,204 @@ async function loadCatalogos() {
       if(_EDIT.cats){
         await api(`${API.categorias}${_EDIT.cats}/`,{method:'PATCH',body:JSON.stringify(payload)});
         delete _EDIT.cats;e.target.querySelector('[type=submit]').textContent='Guardar';
-        document.getElementById('cats-form-title').textContent='Nueva categoria';
+        document.getElementById('cats-form-title').textContent='Nueva categoría';
         e.target.querySelector('.crud-cancel')?.remove();
       } else { await api(API.categorias,{method:'POST',body:JSON.stringify(payload)}); }
-      e.target.reset(); await loadCatalogos(); await loadArticulos();
+      e.target.reset(); await loadCatalogos();
     }catch(err){alert('Error: '+err.message);}
   };
 }
 
+// ================= VISTA ARTICULOS =================
 async function loadArticulos() {
   state.mezcales = await api(API.mezcales);
   if (!state.categorias.length) state.categorias = await api(API.categorias);
   const target = document.getElementById('view-articulos');
+  
+  const catOpts = state.categorias.filter(c => c.activo)
+    .map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
+
   target.innerHTML = `
     <article class="card span-12">
-      <h3 id="arts-form-title">Nuevo articulo (mezcal)</h3>
-      <form id="formMezcal">
-        <div class="field"><label>Nombre</label><input name="nombre" required></div>
-        <div class="field"><label>Precio</label><input type="number" step="0.01" name="precio" required></div>
-        <div class="field"><label>Stock</label><input type="number" name="stock" required></div>
-        <div class="field"><label>Categoria</label><select name="categoria"><option value="">Sin categoria</option>${state.categorias.filter(c=>c.activo).map(c => `<option value="${c.id}">${c.nombre}</option>`).join('')}</select></div>
-        <div class="field"><label>Tipo</label><select name="tipo"><option>joven</option><option>reposado</option><option>anejo</option><option>ancestral</option></select></div>
-        <div class="field"><label>Region</label><input name="region"></div>
-        <div class="field"><label>Activo</label><select name="activo"><option value="true">Si</option><option value="false">No</option></select></div>
-        <div class="field full"><label>Descripcion</label><textarea name="descripcion"></textarea></div>
-        <div class="field full">
-          <label>Imagen del producto</label>
-          <input type="file" name="imagen" accept="image/png,image/jpeg,image/webp" style="padding:8px;cursor:pointer">
-          <p style="margin:4px 0 0;font-size:11px;color:var(--muted)">PNG · JPG · WEBP — max recomendado 2 MB</p>
-        </div>
+      <h3 id="arts-form-title">Nuevo artículo (mezcal)</h3>
+      <form id="formMezcal" enctype="multipart/form-data">
+        <div class="field"><label>Nombre</label><input name="nombre" required /></div>
+        <div class="field"><label>Categoría</label><select name="categoria"><option value="">Sin categoría</option>${catOpts}</select></div>
+        <div class="field"><label>Precio ($ MXN)</label><input name="precio" type="number" step="0.01" required /></div>
+        <div class="field"><label>Stock</label><input name="stock" type="number" value="0" required /></div>
+        <div class="field"><label>Agave / Variedad</label><input name="agave" placeholder="Espadín, Tobalá, etc." /></div>
+        <div class="field"><label>Origen</label><input name="origen" placeholder="Oaxaca, Durango, etc." /></div>
+        <div class="field"><label>Graduación alcohólica (% Alc.)</label><input name="graduacion_alcoholica" type="number" step="0.1" /></div>
+        <div class="field"><label>Contenido (ml)</label><input name="contenido_ml" type="number" value="750" /></div>
+        <div class="field"><label>Activo</label><select name="activo"><option value="true">Sí</option><option value="false">No</option></select></div>
+        <div class="field"><label>Imagen</label><input name="imagen" type="file" accept="image/*" /></div>
+        <div class="field full"><label>Descripción</label><textarea name="descripcion"></textarea></div>
         <div class="field full actions"><button class="btn primary" type="submit">Guardar</button></div>
       </form>
     </article>
     <article class="card span-12">
-      <h3>Articulos</h3>
+      <h3>Catálogo de artículos</h3>
       <div id="st-arts-wrap"></div>
     </article>
   `;
+
   _SR['st-arts'] = () => {
-    const f=ST.filter('st-arts',state.mezcales,['nombre','region','descripcion'],['tipo','activo']);
-    const pg=ST.page('st-arts',f);
-    document.getElementById('st-arts-wrap').innerHTML = ST.wrap('st-arts',pg,
-      ['ID','Img','Nombre','Categoria','Tipo','Precio','Stock','Activo','Acciones'],
-      pg.rows.map(m=>[m.id,
-        m.imagen?`<img src="${m.imagen}" style="width:36px;height:36px;object-fit:cover;border-radius:4px;border:1px solid #d4b896">`:'—',
-        m.nombre,m.categoria_nombre||'—',m.tipo,money(m.precio),m.stock,activoBadge(m.activo,'arts',m.id,'activo'),actBtns('arts',m.id,m.nombre)]),
+    const f = ST.filter('st-arts', state.mezcales, ['nombre', 'agave', 'origen'], ['activo', 'categoria']);
+    const pg = ST.page('st-arts', f);
+    document.getElementById('st-arts-wrap').innerHTML = ST.wrap('st-arts', pg,
+      ['Imagen', 'Nombre', 'Categoría', 'Precio', 'Stock', 'Estado', 'Acciones'],
+      pg.rows.map(a => {
+        const cat = state.categorias.find(c => c.id === a.categoria);
+        const img = a.imagen ? `<img src="${a.imagen}" class="img-thumb" alt="${a.nombre}">` : '<span style="color:var(--muted)">Sin img</span>';
+        return [
+          img,
+          `<strong>${a.nombre}</strong><br><small style="color:var(--muted)">${a.agave||''}</small>`,
+          cat ? cat.nombre : 'Sin categoría',
+          money(a.precio),
+          a.stock,
+          activoBadge(a.activo, 'arts', a.id, 'activo'),
+          actBtns('arts', a.id, a.nombre)
+        ];
+      }),
       [
-        {k:'tipo',lbl:'Tipo de agave',opts:[{v:'joven',l:'Joven'},{v:'reposado',l:'Reposado'},{v:'anejo',l:'Añejo'},{v:'ancestral',l:'Ancestral'}]},
-        {k:'activo',lbl:'Estado',opts:[{v:'true',l:'Activos'},{v:'false',l:'Inactivos'}]}
+        { k: 'activo', lbl: 'Estado', opts: [{ v: 'true', l: 'Activos' }, { v: 'false', l: 'Inactivos' }] },
+        { k: 'categoria', lbl: 'Categoría', opts: state.categorias.map(c => ({ v: String(c.id), l: c.nombre })) }
       ]
     );
   };
   _SR['st-arts']();
-  _CRUD_EDIT['arts']=id=>{
-    const m=state.mezcales.find(x=>x.id===id);if(!m)return;
-    const fm=document.getElementById('formMezcal');
-    fm.nombre.value=m.nombre;fm.precio.value=m.precio;fm.stock.value=m.stock;
-    // Categoría: si está inactiva, añadirla como opción con advertencia
-    const catSel=fm.querySelector('[name=categoria]');
-    const catActual=m.categoria?state.categorias.find(c=>c.id===m.categoria):null;
-    // Limpiar opción de advertencia previa si existe
-    catSel.querySelector('.cat-warn-opt')?.remove();
-    if(catActual && !catActual.activo){
-      const wOpt=new Option(`⚠ ${catActual.nombre} (inactiva)`, catActual.id);
-      wOpt.style.cssText='color:#8d2f24;font-weight:700';
-      wOpt.className='cat-warn-opt';
-      catSel.insertBefore(wOpt, catSel.options[1]);
-    }
-    fm.categoria.value=m.categoria||'';
-    fm.tipo.value=m.tipo;fm.region.value=m.region||'';
-    fm.activo.value=String(m.activo);fm.descripcion.value=m.descripcion||'';
-    if(m.imagen){const p=fm.querySelector('.img-preview')||Object.assign(document.createElement('p'),{className:'img-preview'});p.innerHTML=`<img src="${m.imagen}" style="height:40px;border-radius:4px;vertical-align:middle;margin-right:6px"> Imagen actual`;fm.querySelector('[name=imagen]').before(p);}
-    _EDIT.arts=id;_eMode('formMezcal','arts-form-title','arts');
+
+  _CRUD_EDIT['arts'] = id => {
+    const a = state.mezcales.find(x => x.id === id); if (!a) return;
+    const fm = document.getElementById('formMezcal');
+    fm.nombre.value = a.nombre || '';
+    fm.categoria.value = a.categoria || '';
+    fm.precio.value = a.precio || '';
+    fm.stock.value = a.stock || 0;
+    fm.agave.value = a.agave || '';
+    fm.origen.value = a.origen || '';
+    fm.graduacion_alcoholica.value = a.graduacion_alcoholica || '';
+    fm.contenido_ml.value = a.contenido_ml || 750;
+    fm.activo.value = String(a.activo);
+    fm.descripcion.value = a.descripcion || '';
+    _EDIT.arts = id;
+    _eMode('formMezcal', 'arts-form-title', 'arts');
   };
-  _CRUD_DEL['arts']=async id=>{
-    try{await api(`${API.mezcales}${id}/`,{method:'DELETE'});}catch(e){alert('Error: '+e.message);return;}
+
+  _CRUD_DEL['arts'] = async id => {
+    try { await api(`${API.mezcales}${id}/`, { method: 'DELETE' }); } catch (e) { alert('Error: ' + e.message); return; }
     await loadArticulos();
   };
+
   document.getElementById('formMezcal').onsubmit = async (e) => {
     e.preventDefault();
-    const fd = new FormData(e.target);
-    if (!fd.get('categoria')) fd.delete('categoria');
-    const imgFile = fd.get('imagen');
-    if (!imgFile || imgFile.size === 0) fd.delete('imagen');
-    try{
-      if(_EDIT.arts){
-        await api(`${API.mezcales}${_EDIT.arts}/`,{method:'PATCH',body:fd});
-        delete _EDIT.arts;e.target.querySelector('[type=submit]').textContent='Guardar';
-        document.getElementById('arts-form-title').textContent='Nuevo articulo (mezcal)';
-        e.target.querySelector('.crud-cancel')?.remove();
-        e.target.querySelector('.img-preview')?.remove();
-      } else { await api(API.mezcales,{method:'POST',body:fd}); }
-      e.target.reset(); await loadArticulos();
-    }catch(err){alert('Error: '+err.message);}
+    const fm = e.target;
+    const fd = new FormData(fm);
+    if (!fd.get('imagen')?.name) fd.delete('imagen'); // Eliminar file vacío si no se eligió archivo
+
+    try {
+      if (_EDIT.arts) {
+        await api(`${API.mezcales}${_EDIT.arts}/`, { method: 'PATCH', body: fd });
+        delete _EDIT.arts;
+        fm.querySelector('[type=submit]').textContent = 'Guardar';
+        document.getElementById('arts-form-title').textContent = 'Nuevo artículo (mezcal)';
+        fm.querySelector('.crud-cancel')?.remove();
+      } else {
+        await api(API.mezcales, { method: 'POST', body: fd });
+      }
+      fm.reset();
+      await loadArticulos();
+    } catch (err) { alert('Error al guardar artículo: ' + err.message); }
   };
 }
 
+// ================= VISTA PROMOCIONES =================
 async function loadPromociones() {
-  if (!state.mezcales.length) state.mezcales = await api(API.mezcales);
   state.promociones = await api(API.promociones);
   const target = document.getElementById('view-promociones');
   target.innerHTML = `
     <article class="card span-12">
-      <h3 id="proms-form-title">Nueva promocion</h3>
+      <h3 id="proms-form-title">Nueva promoción</h3>
       <form id="formPromocion">
-        <div class="field"><label>Nombre</label><input name="nombre" required></div>
-        <div class="field"><label>Articulo</label><select name="mezcal"><option value="">Sin articulo</option>${state.mezcales.map(m => `<option value="${m.id}">${m.nombre}</option>`).join('')}</select></div>
-        <div class="field"><label>Tipo descuento</label><select name="tipo_descuento"><option value="porcentaje">Porcentaje</option><option value="monto_fijo">Monto fijo</option></select></div>
-        <div class="field"><label>Valor descuento</label><input type="number" step="0.01" name="valor_descuento" required></div>
-        <div class="field"><label>Fecha inicio</label><input type="date" name="fecha_inicio" required></div>
-        <div class="field"><label>Fecha fin</label><input type="date" name="fecha_fin" required></div>
-        <div class="field"><label>Activo</label><select name="activo"><option value="true">Si</option><option value="false">No</option></select></div>
-        <div class="field full"><label>Descripcion</label><textarea name="descripcion"></textarea></div>
-        <div class="field full actions"><button class="btn alt" type="submit">Guardar</button></div>
+        <div class="field"><label>Título</label><input name="titulo" required /></div>
+        <div class="field"><label>Descuento (%)</label><input name="descuento_porcentaje" type="number" min="0" max="100" step="0.1" required /></div>
+        <div class="field"><label>Fecha Inicio</label><input name="fecha_inicio" type="date" required /></div>
+        <div class="field"><label>Fecha Fin</label><input name="fecha_fin" type="date" required /></div>
+        <div class="field"><label>Activo</label><select name="activo"><option value="true">Sí</option><option value="false">No</option></select></div>
+        <div class="field full"><label>Descripción</label><textarea name="descripcion"></textarea></div>
+        <div class="field full actions"><button class="btn primary" type="submit">Guardar</button></div>
       </form>
     </article>
     <article class="card span-12">
-      <h3>Promociones</h3>
+      <h3>Listado de promociones</h3>
       <div id="st-proms-wrap"></div>
     </article>
   `;
+
   _SR['st-proms'] = () => {
-    const f=ST.filter('st-proms',state.promociones,['nombre','descripcion','mezcal_nombre'],['tipo_descuento','activo']);
-    const pg=ST.page('st-proms',f);
-    document.getElementById('st-proms-wrap').innerHTML = ST.wrap('st-proms',pg,
-      ['ID','Nombre','Articulo','Tipo','Valor','Vigencia','Activo','Acciones'],
-      pg.rows.map(p=>[p.id,p.nombre,p.mezcal_nombre||'General',p.tipo_descuento,p.valor_descuento,`${p.fecha_inicio} a ${p.fecha_fin}`,activoBadge(p.activo,'proms',p.id,'activo'),actBtns('proms',p.id,p.nombre)]),
-      [
-        {k:'tipo_descuento',lbl:'Tipo descuento',opts:[{v:'porcentaje',l:'Porcentaje'},{v:'monto_fijo',l:'Monto fijo'}]},
-        {k:'activo',lbl:'Estado',opts:[{v:'true',l:'Activas'},{v:'false',l:'Inactivas'}]}
-      ]
+    const f = ST.filter('st-proms', state.promociones, ['titulo', 'descripcion'], ['activo']);
+    const pg = ST.page('st-proms', f);
+    document.getElementById('st-proms-wrap').innerHTML = ST.wrap('st-proms', pg,
+      ['ID', 'Título', 'Descuento', 'Vigencia', 'Estado', 'Acciones'],
+      pg.rows.map(p => [
+        p.id,
+        `<strong>${p.titulo}</strong>`,
+        `${p.descuento_porcentaje}%`,
+        `${p.fecha_inicio || ''} al ${p.fecha_fin || ''}`,
+        activoBadge(p.activo, 'proms', p.id, 'activo'),
+        actBtns('proms', p.id, p.titulo)
+      ]),
+      [{ k: 'activo', lbl: 'Estado', opts: [{ v: 'true', l: 'Activos' }, { v: 'false', l: 'Inactivos' }] }]
     );
   };
   _SR['st-proms']();
-  _CRUD_EDIT['proms']=id=>{
-    const p=state.promociones.find(x=>x.id===id);if(!p)return;
-    const fm=document.getElementById('formPromocion');
-    fm.nombre.value=p.nombre;fm.mezcal.value=p.mezcal||'';fm.tipo_descuento.value=p.tipo_descuento;
-    fm.valor_descuento.value=p.valor_descuento;fm.fecha_inicio.value=p.fecha_inicio;
-    fm.fecha_fin.value=p.fecha_fin;fm.activo.value=String(p.activo);fm.descripcion.value=p.descripcion||'';
-    _EDIT.proms=id;_eMode('formPromocion','proms-form-title','proms');
+
+  _CRUD_EDIT['proms'] = id => {
+    const p = state.promociones.find(x => x.id === id); if (!p) return;
+    const fm = document.getElementById('formPromocion');
+    fm.titulo.value = p.titulo || '';
+    fm.descuento_porcentaje.value = p.descuento_porcentaje || '';
+    fm.fecha_inicio.value = p.fecha_inicio || '';
+    fm.fecha_fin.value = p.fecha_fin || '';
+    fm.activo.value = String(p.activo);
+    fm.descripcion.value = p.descripcion || '';
+    _EDIT.proms = id;
+    _eMode('formPromocion', 'proms-form-title', 'proms');
   };
-  _CRUD_DEL['proms']=async id=>{
-    try{await api(`${API.promociones}${id}/`,{method:'DELETE'});}catch(e){alert('Error: '+e.message);return;}
+
+  _CRUD_DEL['proms'] = async id => {
+    try { await api(`${API.promociones}${id}/`, { method: 'DELETE' }); } catch (e) { alert('Error: ' + e.message); return; }
     await loadPromociones();
   };
+
   document.getElementById('formPromocion').onsubmit = async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
-    const payload={nombre:f.get('nombre'),descripcion:f.get('descripcion'),tipo_descuento:f.get('tipo_descuento'),
-      valor_descuento:f.get('valor_descuento'),fecha_inicio:f.get('fecha_inicio'),fecha_fin:f.get('fecha_fin'),
-      activo:f.get('activo')==='true',mezcal:f.get('mezcal')||null};
-    try{
-      if(_EDIT.proms){
-        await api(`${API.promociones}${_EDIT.proms}/`,{method:'PATCH',body:JSON.stringify(payload)});
-        delete _EDIT.proms;e.target.querySelector('[type=submit]').textContent='Guardar';
-        document.getElementById('proms-form-title').textContent='Nueva promocion';
+    const payload = {
+      titulo: f.get('titulo'),
+      descuento_porcentaje: f.get('descuento_porcentaje'),
+      fecha_inicio: f.get('fecha_inicio'),
+      fecha_fin: f.get('fecha_fin'),
+      activo: f.get('activo') === 'true',
+      descripcion: f.get('descripcion')
+    };
+    try {
+      if (_EDIT.proms) {
+        await api(`${API.promociones}${_EDIT.proms}/`, { method: 'PATCH', body: JSON.stringify(payload) });
+        delete _EDIT.proms;
+        e.target.querySelector('[type=submit]').textContent = 'Guardar';
+        document.getElementById('proms-form-title').textContent = 'Nueva promoción';
         e.target.querySelector('.crud-cancel')?.remove();
-      } else { await api(API.promociones,{method:'POST',body:JSON.stringify(payload)}); }
-      e.target.reset(); await loadPromociones();
-    }catch(err){alert('Error: '+err.message);}
+      } else {
+        await api(API.promociones, { method: 'POST', body: JSON.stringify(payload) });
+      }
+      e.target.reset();
+      await loadPromociones();
+    } catch (err) { alert('Error: ' + err.message); }
   };
 }
 
+// ================= VISTA USUARIOS =================
 async function loadUsuarios() {
   state.usuarios = await api(API.usuarios);
   const target = document.getElementById('view-usuarios');
@@ -935,253 +1013,254 @@ async function loadUsuarios() {
     <article class="card span-12">
       <h3 id="usrs-form-title">Nuevo usuario</h3>
       <form id="formUsuario">
-        <div class="field"><label>Usuario</label><input name="username" required></div>
-        <div class="field"><label>Email</label><input type="email" name="email"></div>
-        <div class="field"><label>Contraseña</label><input type="password" name="password" id="usrPwd" placeholder="Requerida al crear"></div>
-        <div class="field"><label>Rol</label><select name="rol"><option value="usuario">Usuario</option><option value="administrador">Administrador</option></select></div>
-        <div class="field"><label>Activo</label><select name="is_active"><option value="true">Si</option><option value="false">No</option></select></div>
+        <div class="field"><label>Usuario</label><input name="username" required /></div>
+        <div class="field"><label>Correo electrónico</label><input name="email" type="email" required /></div>
+        <div class="field"><label>Contraseña</label><input name="password" type="password" placeholder="(Dejar en blanco para no cambiar en edición)" /></div>
+        <div class="field"><label>Rol / Permisos</label><select name="is_staff"><option value="false">Cliente</option><option value="true">Administrador</option></select></div>
+        <div class="field"><label>Activo</label><select name="is_active"><option value="true">Sí</option><option value="false">No</option></select></div>
         <div class="field full actions"><button class="btn primary" type="submit">Guardar</button></div>
       </form>
     </article>
     <article class="card span-12">
-      <h3>Usuarios del sistema</h3>
+      <h3>Usuarios registrados</h3>
       <div id="st-usrs-wrap"></div>
     </article>
   `;
+
   _SR['st-usrs'] = () => {
-    const f=ST.filter('st-usrs',state.usuarios,['username','email'],['rol','is_active']);
-    const pg=ST.page('st-usrs',f);
-    document.getElementById('st-usrs-wrap').innerHTML = ST.wrap('st-usrs',pg,
-      ['ID','Usuario','Email','Rol','Activo','Alta','Acciones'],
-      pg.rows.map(u=>[u.id,u.username,u.email||'',u.rol,activoBadge(u.is_active,'usrs',u.id,'is_active'),
-        new Date(u.date_joined).toLocaleDateString('es-MX'),actBtns('usrs',u.id,u.username)]),
-      [
-        {k:'rol',lbl:'Rol',opts:[{v:'administrador',l:'Administrador'},{v:'usuario',l:'Usuario'}]},
-        {k:'is_active',lbl:'Estado',opts:[{v:'true',l:'Activos'},{v:'false',l:'Inactivos'}]}
-      ]
+    const f = ST.filter('st-usrs', state.usuarios, ['username', 'email'], ['is_active']);
+    const pg = ST.page('st-usrs', f);
+    document.getElementById('st-usrs-wrap').innerHTML = ST.wrap('st-usrs', pg,
+      ['ID', 'Usuario', 'Correo', 'Rol', 'Estado', 'Acciones'],
+      pg.rows.map(u => [
+        u.id,
+        `<strong>${u.username}</strong>`,
+        u.email || '-',
+        u.is_staff ? '<span style="color:var(--brand);font-weight:bold">Administrador</span>' : 'Cliente',
+        activoBadge(u.is_active, 'usrs', u.id, 'is_active'),
+        actBtns('usrs', u.id, u.username)
+      ]),
+      [{ k: 'is_active', lbl: 'Estado', opts: [{ v: 'true', l: 'Activos' }, { v: 'false', l: 'Inactivos' }] }]
     );
   };
   _SR['st-usrs']();
-  _CRUD_EDIT['usrs']=id=>{
-    const u=state.usuarios.find(x=>x.id===id);if(!u)return;
-    const fm=document.getElementById('formUsuario');
-    fm.username.value=u.username;fm.email.value=u.email||'';fm.rol.value=u.rol;
-    fm.is_active.value=String(u.is_active);
-    document.getElementById('usrPwd').placeholder='Dejar vacío para no cambiar';
-    _EDIT.usrs=id;_eMode('formUsuario','usrs-form-title','usrs');
+
+  _CRUD_EDIT['usrs'] = id => {
+    const u = state.usuarios.find(x => x.id === id); if (!u) return;
+    const fm = document.getElementById('formUsuario');
+    fm.username.value = u.username || '';
+    fm.email.value = u.email || '';
+    fm.password.value = '';
+    fm.is_staff.value = String(u.is_staff);
+    fm.is_active.value = String(u.is_active);
+    _EDIT.usrs = id;
+    _eMode('formUsuario', 'usrs-form-title', 'usrs');
   };
-  _CRUD_DEL['usrs']=async id=>{
-    try{await api(`${API.usuarios}${id}/`,{method:'DELETE'});}catch(e){alert('Error: '+e.message);return;}
-    state.usuarios=await api(API.usuarios);_SR['st-usrs']();
+
+  _CRUD_DEL['usrs'] = async id => {
+    try { await api(`${API.usuarios}${id}/`, { method: 'DELETE' }); } catch (e) { alert('Error: ' + e.message); return; }
+    await loadUsuarios();
   };
+
   document.getElementById('formUsuario').onsubmit = async (e) => {
     e.preventDefault();
-    const f=new FormData(e.target);
-    const payload={username:f.get('username'),email:f.get('email'),rol:f.get('rol'),is_active:f.get('is_active')==='true'};
-    const pwd=f.get('password')?.trim();
-    try{
-      if(_EDIT.usrs){
-        if(pwd)payload.password=pwd;
-        await api(`${API.usuarios}${_EDIT.usrs}/`,{method:'PATCH',body:JSON.stringify(payload)});
-        delete _EDIT.usrs;e.target.querySelector('[type=submit]').textContent='Guardar';
-        document.getElementById('usrs-form-title').textContent='Nuevo usuario';
-        document.getElementById('usrPwd').placeholder='Requerida al crear';
+    const f = new FormData(e.target);
+    const payload = {
+      username: f.get('username'),
+      email: f.get('email'),
+      is_staff: f.get('is_staff') === 'true',
+      is_active: f.get('is_active') === 'true'
+    };
+    if (f.get('password')) payload.password = f.get('password');
+
+    try {
+      if (_EDIT.usrs) {
+        await api(`${API.usuarios}${_EDIT.usrs}/`, { method: 'PATCH', body: JSON.stringify(payload) });
+        delete _EDIT.usrs;
+        e.target.querySelector('[type=submit]').textContent = 'Guardar';
+        document.getElementById('usrs-form-title').textContent = 'Nuevo usuario';
         e.target.querySelector('.crud-cancel')?.remove();
       } else {
-        if(!pwd){alert('La contraseña es requerida al crear un usuario.');return;}
-        payload.password=pwd;
-        await api(API.usuarios,{method:'POST',body:JSON.stringify(payload)});
+        if (!payload.password) throw new Error('La contraseña es requerida para un nuevo usuario.');
+        await api(API.usuarios, { method: 'POST', body: JSON.stringify(payload) });
       }
       e.target.reset();
-      state.usuarios=await api(API.usuarios);_SR['st-usrs']();
-    }catch(err){alert('Error: '+err.message);}
+      await loadUsuarios();
+    } catch (err) { alert('Error: ' + err.message); }
   };
 }
 
-async function loadResenas() {
-  state.resenas = await api(API.resenas);
-  const target = document.getElementById('view-resenas');
-  target.innerHTML = `
-    <article class="card span-12">
-      <h3>Reseñas de clientes</h3>
-      <div id="st-resenas-wrap"></div>
-    </article>
-  `;
-  _SR['st-resenas'] = () => {
-    const f = ST.filter('st-resenas', state.resenas, ['usuario','mezcal_nombre','comentario'], []);
-    const pg = ST.page('st-resenas', f);
-    document.getElementById('st-resenas-wrap').innerHTML = ST.wrap('st-resenas', pg,
-      ['ID','Usuario','Articulo','Comentario','Fecha','Acciones'],
-      pg.rows.map(r => [
-        r.id, r.usuario, r.mezcal_nombre || '—', r.comentario,
-        new Date(r.creado_en).toLocaleDateString('es-MX'),
-        `<button class="btn danger resena-del" data-id="${r.id}" style="padding:3px 10px;font-size:11px">&#10005; Borrar</button>`
-      ])
-    );
-  };
-  _SR['st-resenas']();
-}
-
-async function bootstrapApp() {
-  document.getElementById('login').classList.add('hidden');
-  document.getElementById('app').classList.remove('hidden');
-  await Promise.all([loadReporte(), loadCatalogos(), loadArticulos(), loadPromociones(), loadUsuarios(), loadResenas()]);
-  loadCompras();
-}
-
-document.addEventListener('click', async e => {
-  if (!e.target.classList.contains('resena-del')) return;
-  const id = e.target.dataset.id;
-  if (!confirm('¿Eliminar esta reseña? Esta acción no se puede deshacer.')) return;
+// ================= VISTA COMPRAS =================
+async function loadCompras() {
+  const target = document.getElementById('view-compras');
+  target.innerHTML = '<p>Cargando compras...</p>';
   try {
-    await api(`${API.resenas}${id}/`, { method: 'DELETE' });
-    state.resenas = state.resenas.filter(r => String(r.id) !== id);
-    _SR['st-resenas']?.();
-  } catch (err) { alert('Error: ' + err.message); }
-});
-
-document.getElementById('loginForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const status = document.getElementById('loginStatus');
-  status.textContent = 'Validando credenciales...';
-  try {
-    const form = new FormData(e.target);
-    const data = await api(API.token, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: form.get('username'), password: form.get('password') })
-    });
-    setAuth(data.access, data.refresh);
-
-    // Verificar rol antes de dejar entrar
-    const perfil = await api('/api/me/');
-    if (perfil.rol !== 'administrador') {
-      setAuth('', ''); // limpiar token
-      status.textContent = 'Acceso denegado: esta cuenta no tiene permisos de administrador.';
-      return;
-    }
-
-    status.textContent = '';
-    await bootstrapApp();
-  } catch (err) {
-    status.textContent = 'No fue posible iniciar sesión. Revisa usuario y contraseña.';
-  }
-});
-
-document.querySelectorAll('.menu button[data-view]').forEach(btn => {
-  btn.addEventListener('click', () => showView(btn.dataset.view));
-});
-
-document.getElementById('logoutBtn').addEventListener('click', logout);
-
-// ========= IA & Chatbot =========
-let chatHistorial = [];
-
-function toggleChat() {
-  const panel = document.getElementById('chatPanel');
-  const visible = panel.style.display !== 'none';
-  panel.style.display = visible ? 'none' : 'flex';
-  if (!visible) {
-    document.getElementById('chatInput').focus();
-    if (!chatHistorial.length)
-      appendMsg('bot', '¡Hola! Soy el asistente de Mezcal POS. Puedo ayudarte con inventario, ventas, estrategias de marketing y más. ¿En qué te ayudo?');
-  }
-}
-
-function appendMsg(role, text, typing = false) {
-  const c = document.getElementById('chatMessages');
-  const d = document.createElement('div');
-  d.className = `chat-msg chat-msg-${role}${typing ? ' chat-typing' : ''}`;
-  d.textContent = text;
-  if (typing) d.id = 'chat-typing';
-  c.appendChild(d);
-  c.scrollTop = c.scrollHeight;
-  return d;
-}
-
-async function sendChat() {
-  const inp = document.getElementById('chatInput');
-  const msg = inp.value.trim();
-  if (!msg) return;
-  inp.value = ''; inp.disabled = true;
-  appendMsg('user', msg);
-  chatHistorial.push({ role: 'user', content: msg });
-  const typing = appendMsg('bot', 'Escribiendo...', true);
-  try {
-    const data = await api('/api/ia/chat/', {
-      method: 'POST',
-      body: JSON.stringify({ mensaje: msg, historial: chatHistorial.slice(-10) })
-    });
-    typing.remove();
-    appendMsg('bot', data.respuesta);
-    chatHistorial.push({ role: 'assistant', content: data.respuesta });
-  } catch(e) {
-    typing.remove();
-    appendMsg('bot', e.message.includes('OPENAI_API_KEY')
-      ? 'Configura tu OPENAI_API_KEY en el archivo .env para activar el asistente.'
-      : 'Error al conectar con el asistente: ' + e.message);
-  } finally {
-    inp.disabled = false; inp.focus();
-  }
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-  const inp = document.getElementById('chatInput');
-  if (inp) inp.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) sendChat(); });
-});
-
-function loadCompras() {
-  const t = document.getElementById('view-compras');
-  t.innerHTML = '<article class="card span-12"><h3>Compras</h3><p style="color:var(--muted)">Cargando historial...</p></article>';
-  api('/api/ordenes/').then(ordenes => {
-    const badge = est => {
-      const c = {pagado:'#4a6b3c', pendiente:'#8a5c2f', cancelado:'#8d2f24'}[est] || '#666';
-      return `<span style="background:${c};color:white;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;letter-spacing:.4px">${est.toUpperCase()}</span>`;
-    };
-    t.innerHTML = `<article class="card span-12">
-      <h3>Historial de compras</h3>
-      <div id="st-comp-wrap"></div>
-    </article>`;
-    _SR['st-comp'] = () => {
-      const f=ST.filter('st-comp',ordenes,['usuario'],['estado']);
-      const pg=ST.page('st-comp',f);
-      const accion = o => o.estado==='pendiente'
-        ? `<button class="btn danger" onclick="cancelarOrden(${o.id},this)" style="padding:3px 10px;font-size:11px">&#10005; Cancelar</button>`
-        : `<span style="font-size:11px;color:var(--muted)">${o.estado==='cancelado'?'Cancelada':'Pagada'}</span>`;
-      document.getElementById('st-comp-wrap').innerHTML = ST.wrap('st-comp',pg,
-        ['#','Cliente','Total','Estado','Productos','Fecha','Accion'],
-        pg.rows.map(o=>[o.id,o.usuario,money(o.total),badge(o.estado),
-          `${o.items.length} prod.`,
-          new Date(o.creado_en).toLocaleDateString('es-MX',{day:'2-digit',month:'short',year:'numeric'}),
-          accion(o)]),
-        [{k:'estado',lbl:'Estado',opts:[{v:'pagado',l:'Pagado'},{v:'pendiente',l:'Pendiente'},{v:'cancelado',l:'Cancelado'}]}]
+    state.compras = await api(API.compras);
+    target.innerHTML = `
+      <article class="card span-12">
+        <h3>Historial de Órdenes y Compras</h3>
+        <div id="st-compras-wrap"></div>
+      </article>
+    `;
+    _SR['st-compras'] = () => {
+      const f = ST.filter('st-compras', state.compras, ['id', 'usuario__username', 'estado'], []);
+      const pg = ST.page('st-compras', f);
+      document.getElementById('st-compras-wrap').innerHTML = ST.wrap('st-compras', pg,
+        ['Orden #', 'Cliente', 'Fecha', 'Total', 'Estado'],
+        pg.rows.map(c => [
+          `#${c.id}`,
+          c.usuario_nombre || c.usuario || 'Anónimo',
+          c.fecha ? new Date(c.fecha).toLocaleString('es-MX') : '-',
+          money(c.total),
+          `<span style="padding:3px 8px;border-radius:4px;background:#e2cebc;font-size:11px;font-weight:bold">${c.estado || 'Completada'}</span>`
+        ])
       );
     };
-    _SR['st-comp']();
-    window.cancelarOrden = async (id, btn) => {
-      if(!confirm('Cancelar esta orden?')) return;
-      btn.disabled=true;
-      try{
-        await api(`/api/ordenes/${id}/`,{method:'PATCH',body:JSON.stringify({estado:'cancelado'})});
-        const idx=ordenes.findIndex(o=>o.id===id);
-        if(idx>=0)ordenes[idx].estado='cancelado';
-        _SR['st-comp']();
-      }catch(e){alert('Error: '+e.message);btn.disabled=false;}
+    _SR['st-compras']();
+  } catch (e) {
+    target.innerHTML = `<p style="color:var(--danger)">Error al cargar compras: ${e.message}</p>`;
+  }
+}
+
+// ================= VISTA RESEÑAS =================
+async function loadResenas() {
+  const target = document.getElementById('view-resenas');
+  target.innerHTML = '<p>Cargando reseñas...</p>';
+  try {
+    state.resenas = await api(API.resenas);
+    target.innerHTML = `
+      <article class="card span-12">
+        <h3>Reseñas de Productos</h3>
+        <div id="st-resenas-wrap"></div>
+      </article>
+    `;
+    _SR['st-resenas'] = () => {
+      const f = ST.filter('st-resenas', state.resenas, ['comentario', 'usuario_nombre', 'mezcal_nombre'], []);
+      const pg = ST.page('st-resenas', f);
+      document.getElementById('st-resenas-wrap').innerHTML = ST.wrap('st-resenas', pg,
+        ['Artículo', 'Usuario', 'Calificación', 'Comentario', 'Acciones'],
+        pg.rows.map(r => [
+          `<strong>${r.mezcal_nombre || 'Mezcal'}</strong>`,
+          r.usuario_nombre || 'Anónimo',
+          '⭐'.repeat(r.calificacion || 5),
+          r.comentario || 'Sin comentario',
+          `<button onclick="_deleteResena(${r.id})" class="btn danger" style="padding:3px 8px;font-size:11px">Eliminar</button>`
+        ])
+      );
     };
-  }).catch(e => {
-    t.innerHTML = `<article class="card span-12"><p style="color:#8d2f24;padding:12px">Error: ${e.message}</p></article>`;
-  });
+    _SR['st-resenas']();
+  } catch (e) {
+    target.innerHTML = `<p style="color:var(--danger)">Error al cargar reseñas: ${e.message}</p>`;
+  }
 }
 
-if (state.token) {
-  api('/api/me/')
-    .then(perfil => {
-      if (perfil.rol !== 'administrador') { logout(); return; }
-      return bootstrapApp();
-    })
-    .catch(() => logout());
+window._deleteResena = async (id) => {
+  if (!confirm('¿Eliminar esta reseña?')) return;
+  try {
+    await api(`${API.resenas}${id}/`, { method: 'DELETE' });
+    await loadResenas();
+  } catch(e) { alert('Error: ' + e.message); }
+};
+
+// ================= CHATBOT WIDGET =================
+const chatBtn = document.getElementById('chatBtn');
+const chatPanel = document.getElementById('chatPanel');
+const chatCloseBtn = document.getElementById('chatCloseBtn');
+const chatMessages = document.getElementById('chatMessages');
+const chatInput = document.getElementById('chatInput');
+const chatSendBtn = document.getElementById('chatSendBtn');
+
+chatBtn.onclick = () => chatPanel.classList.toggle('hidden');
+chatCloseBtn.onclick = () => chatPanel.classList.add('hidden');
+
+async function sendChatMessage() {
+  const text = chatInput.value.trim();
+  if (!text) return;
+
+  // Agregar mensaje del usuario
+  const uDiv = document.createElement('div');
+  uDiv.className = 'chat-msg chat-msg-user';
+  uDiv.textContent = text;
+  chatMessages.appendChild(uDiv);
+  chatInput.value = '';
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+
+  // Agregar indicador "Escribiendo..."
+  const typing = document.createElement('div');
+  typing.className = 'chat-msg chat-msg-bot chat-typing';
+  typing.textContent = 'Escribiendo...';
+  chatMessages.appendChild(typing);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+
+  try {
+    const res = await api(API.chatbot, {
+      method: 'POST',
+      body: JSON.stringify({ mensaje: text })
+    });
+    typing.remove();
+    const bDiv = document.createElement('div');
+    bDiv.className = 'chat-msg chat-msg-bot';
+    bDiv.textContent = res.respuesta || 'No se recibió respuesta.';
+    chatMessages.appendChild(bDiv);
+  } catch(e) {
+    typing.remove();
+    const bDiv = document.createElement('div');
+    bDiv.className = 'chat-msg chat-msg-bot';
+    bDiv.style.color = 'var(--danger)';
+    bDiv.textContent = 'Atención: ' + e.message;
+    chatMessages.appendChild(bDiv);
+  }
+  chatMessages.scrollTop = chatMessages.scrollHeight;
 }
+
+chatSendBtn.onclick = sendChatMessage;
+chatInput.onkeypress = (e) => { if (e.key === 'Enter') sendChatMessage(); };
+
+// ================= AUTENTICACION & INICIALIZACIÓN =================
+document.getElementById('loginForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const st = document.getElementById('loginStatus');
+  st.textContent = 'Autenticando...';
+  const f = new FormData(e.target);
+  try {
+    const res = await fetch(API.token, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: f.get('username'),
+        password: f.get('password')
+      })
+    });
+    if (!res.ok) throw new Error('Credenciales inválidas');
+    const data = await res.json();
+    setAuth(data.access, data.refresh);
+    st.textContent = '';
+    initApp();
+  } catch(err) {
+    st.textContent = err.message;
+  }
+};
+
+document.getElementById('logoutBtn').onclick = logout;
+
+// Event Listeners Menú Navegación
+document.querySelectorAll('.menu button[data-view]').forEach(btn => {
+  btn.onclick = () => showView(btn.dataset.view);
+});
+
+async function initApp() {
+  if (!state.token) {
+    document.getElementById('login').classList.remove('hidden');
+    document.getElementById('app').classList.add('hidden');
+    return;
+  }
+  document.getElementById('login').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  showView('reporte');
+}
+
+// Iniciar aplicación
+initApp();
 </script>
-
 </body>
 </html>
