@@ -129,7 +129,7 @@ async function loadReporte() {
         data: {
           labels: data.top_articulos?.length ? data.top_articulos.map(x => x.mezcal__nombre || 'Sin nombre') : ['Sin datos'],
           datasets: [{ label: 'Unidades vendidas',
-            data: data.top_articulos?.length ? data.top_articulos.map(x => x.cantidad_vendida) : [0],
+            data: data.top_articulos?.length ? data.top_articulos.map(x => x.cantidad) : [0],
             backgroundColor: PALETTE, borderRadius: 5, borderSkipped: false }]
         },
         options: { indexAxis: 'y', responsive: true,
