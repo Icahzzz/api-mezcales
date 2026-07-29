@@ -228,6 +228,12 @@ class OrdenViewSet(viewsets.ModelViewSet):
             orden = Orden.objects.get(id=orden_id, usuario=request.user)
         except (Orden.DoesNotExist, ValueError):
             return Response({'error': 'Orden no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+        
+        metodo_pago = request.data.get('metodo_pago')
+        if metodo_pago in ['efectivo', 'tarjeta']:
+            orden.metodo_pago = metodo_pago
+            orden.save()
+
 
         # Idempotencia: Si ya está procesada, devolver la orden sin dar error
         if orden.estado in ['recibido', 'pagado', 'repartiendo', 'entregado']:
