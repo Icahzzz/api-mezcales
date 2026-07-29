@@ -392,13 +392,30 @@ class ReporteVentasViewSet(viewsets.ViewSet):
             .order_by("-cantidad")[:10]
         )
 
+        ventas_por_usuario = (
+            ordenes
+            .values("usuario__username")
+            .annotate(total_gastado=Sum("total"))
+            .order_by("-total_gastado")[:10]
+        )
+
+        productos_valorados = (
+            Mezcal.objects
+            .annotate(promedio=Avg('calificaciones__valor'), num_calificaciones=Count('calificaciones'))
+            .filter(num_calificaciones__gt=0)
+            .order_by('-promedio')[:10]
+            .values('nombre', 'promedio', 'num_calificaciones')
+        )
+
         return Response({
             "kpis": {
                 "total_ventas": total_ventas,
                 "total_ordenes": total_ordenes,
                 "ticket_promedio": ticket
             },
-            "top_articulos": list(top)
+            "top_articulos": list(top),
+            "ventas_por_usuario": list(ventas_por_usuario),
+            "productos_valorados": list(productos_valorados)
         })
 
 
