@@ -636,7 +636,7 @@ async function loadUsuarios() {
         <div class="field"><label>Email</label><input name="email" type="email" required></div>
         <div class="field"><label>Nombre</label><input name="first_name"></div>
         <div class="field"><label>Apellido</label><input name="last_name"></div>
-        <div class="field"><label>Rol</label><select name="rol"><option value="cliente">Cliente</option><option value="administrador">Administrador</option></select></div>
+        <div class="field"><label>Rol</label><select name="rol"><option value="usuario">Usuario</option><option value="administrador">Administrador</option></select></div>
         <div class="field"><label>Contraseña</label><input name="password" type="password" placeholder="Solo al crear o cambiar"></div>
         <div class="field full actions"><button class="btn primary" type="submit">Guardar</button></div>
       </form>
@@ -667,7 +667,7 @@ async function loadUsuarios() {
     const fm=document.getElementById('formUsuario');
     fm.username.value=u.username; fm.email.value=u.email;
     fm.first_name.value=u.first_name||''; fm.last_name.value=u.last_name||'';
-    fm.rol.value=u.rol||'cliente'; fm.password.value='';
+    fm.rol.value=u.rol||'usuario'; fm.password.value='';
     _EDIT.usrs=id;_eMode('formUsuario','usrs-form-title','usrs');
   };
 
@@ -940,7 +940,7 @@ async function loadResenas() {
         r.id,
         r.mezcal_nombre || 'Producto',
         r.usuario_username || 'Cliente',
-        '⭐'.repeat(r.calificacion || 5),
+        renderEstrellas(r.calificacion),
         r.comentario || 'Sin comentario',
         r.creado_en ? new Date(r.creado_en).toLocaleDateString('es-MX') : '-'
       ]),
