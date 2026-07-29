@@ -513,13 +513,24 @@ async function loadArticulos() {
 
 // ================= VISTA PROMOCIONES =================
 async function loadPromociones() {
+  if (!state.mezcales.length) state.mezcales = await api(API.mezcales);
   state.promociones = await api(API.promociones);
+  const mezcalOpts = state.mezcales
+    .map(m => `<option value="${m.id}">${m.nombre}</option>`).join('');
+
   const target = document.getElementById('view-promociones');
   target.innerHTML = `
     <article class="card span-12">
       <h3 id="proms-form-title">Nueva promoción</h3>
       <form id="formPromocion">
         <div class="field"><label>Título</label><input name="titulo" required></div>
+        <div class="field">
+          <label>Artículo (mezcal)</label>
+          <select name="mezcal"><option value="">General (sin artículo específico)</option>${mezcalOpts}</select>
+        </div>
+        <div class="field full" id="promMezcalPreview" style="display:none">
+          <img id="promMezcalPreviewImg" src="" style="height:70px;border-radius:6px;border:1px solid var(--line);object-fit:cover">
+        </div>
         <div class="field"><label>Porcentaje Descuento (%)</label><input name="descuento_porcentaje" type="number" min="1" max="100" required></div>
         <div class="field"><label>Fecha Inicio</label><input name="fecha_inicio" type="date" required></div>
         <div class="field"><label>Fecha Fin</label><input name="fecha_fin" type="date" required></div>
@@ -534,13 +545,27 @@ async function loadPromociones() {
     </article>
   `;
 
+  // Preview de imagen al elegir un mezcal
+  const selMezcal = document.querySelector('#formPromocion [name=mezcal]');
+  const previewBox = document.getElementById('promMezcalPreview');
+  const previewImg = document.getElementById('promMezcalPreviewImg');
+  selMezcal.addEventListener('change', () => {
+    const m = state.mezcales.find(x => String(x.id) === selMezcal.value);
+    if (m && m.imagen) {
+      previewImg.src = m.imagen;
+      previewBox.style.display = 'block';
+    } else {
+      previewBox.style.display = 'none';
+    }
+  });
+
   _SR['st-proms'] = () => {
-    const f=ST.filter('st-proms',state.promociones,['titulo','descripcion'],['activa']);
+    const f=ST.filter('st-proms',state.promociones,['titulo','descripcion','mezcal_nombre'],['activa']);
     const pg=ST.page('st-proms',f);
     document.getElementById('st-proms-wrap').innerHTML = ST.wrap('st-proms',pg,
-      ['ID','Título','Descuento','Inicio','Fin','Activa','Acciones'],
+      ['ID','Título','Artículo','Descuento','Inicio','Fin','Activa','Acciones'],
       pg.rows.map(p=>[
-        p.id, p.titulo, `${p.descuento_porcentaje}%`,
+        p.id, p.titulo, p.mezcal_nombre || 'General', `${p.descuento_porcentaje}%`,
         p.fecha_inicio, p.fecha_fin,
         activoBadge(p.activa,'proms',p.id,'activa'),
         actBtns('proms',p.id,p.titulo)
@@ -556,6 +581,8 @@ async function loadPromociones() {
     fm.titulo.value=p.titulo; fm.descuento_porcentaje.value=p.descuento_porcentaje;
     fm.fecha_inicio.value=p.fecha_inicio; fm.fecha_fin.value=p.fecha_fin;
     fm.activa.value=String(p.activa); fm.descripcion.value=p.descripcion||'';
+    fm.mezcal.value = p.mezcal || '';
+    fm.mezcal.dispatchEvent(new Event('change'));
     _EDIT.proms=id;_eMode('formPromocion','proms-form-title','proms');
   };
 
@@ -572,7 +599,8 @@ async function loadPromociones() {
       fecha_inicio: e.target.fecha_inicio.value,
       fecha_fin: e.target.fecha_fin.value,
       activa: e.target.activa.value === 'true',
-      descripcion: e.target.descripcion.value
+      descripcion: e.target.descripcion.value,
+      mezcal: e.target.mezcal.value || null
     };
     const isEdit = !!_EDIT.proms;
     const url = isEdit ? `${API.promociones}${_EDIT.proms}/` : API.promociones;
@@ -581,6 +609,7 @@ async function loadPromociones() {
       await api(url, { method, body: JSON.stringify(data) });
       delete _EDIT.proms;
       e.target.reset();
+      previewBox.style.display = 'none';
       await loadPromociones();
     } catch(err) { alert('Error: ' + err.message); }
   };
