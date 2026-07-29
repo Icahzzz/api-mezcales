@@ -657,7 +657,7 @@ async function loadUsuarios() {
         u.email, `<span class="badge">${u.rol}</span>`,
         actBtns('usrs',u.id,u.username)
       ]),
-      [{k:'rol',lbl:'Rol',opts:[{v:'cliente',l:'Clientes'},{v:'administrador',l:'Admins'}]}]
+      [{k:'rol', lbl:'Rol', opts:[{v:'usuario', l:'Usuario'},{v:'administrador', l:'Administrador'}]}]
     );
   };
   _SR['st-usrs']();
@@ -911,6 +911,16 @@ window.avanzarPedido = async function(id, nuevoEstado) {
 };
 
 // ================= VISTA RESEÑAS =================
+function renderEstrellas(valor) {
+  const v = Number(valor) || 0;
+  let html = '<span style="letter-spacing:2px;color:#c2995b;font-size:14px">';
+  for (let i = 1; i <= 5; i++) {
+    html += i <= v ? '★' : '☆';
+  }
+  html += `</span> <span style="color:var(--muted);font-size:11px">(${v})</span>`;
+  return html;
+}
+
 async function loadResenas() {
   state.resenas = await api(API.resenas);
   const target = document.getElementById('view-resenas');
