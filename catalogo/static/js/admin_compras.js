@@ -711,7 +711,7 @@ async function loadCompras() {
             money(o.total),
             `<strong style="color: ${metodoDisplay === 'TARJETA' ? '#2b6cb0' : '#2f855a'}">${metodoDisplay}</strong>`,
             renderEstadoBadge(o.estado_actual),
-            o.pedido_display ? renderPedidoBadge(o.pedido_display) : '<span style="color:var(--muted);font-size:12px">—</span>',
+            o.pedido_display ? renderPedidoBadge(o.pedido_display, o.id, o.estado) : '<span style="color:var(--muted);font-size:12px">—</span>',
             renderAccionesOrden(o)
           ];
         }),
@@ -762,14 +762,26 @@ function renderEstadoBadge(estado) {
   return `<span style="${style}padding:4px 10px;border-radius:12px;font-size:11px;font-weight:700;text-transform:uppercase;">${estado}</span>`;
 }
 
-function renderPedidoBadge(pedido) {
+function renderPedidoBadge(pedido, ordenId, estadoRaw) {
   const colors = {
     'Recibido': 'background:#2b6cb0;color:white;',
     'En reparto': 'background:#b7791f;color:white;',
     'Entregado': 'background:#2f855a;color:white;'
   };
   const style = colors[pedido] || 'background:#718096;color:white;';
-  return `<span style="${style}padding:4px 10px;border-radius:12px;font-size:11px;font-weight:700;text-transform:uppercase;">${pedido}</span>`;
+
+  const siguienteEstado = { 'recibido': 'repartiendo', 'repartiendo': 'entregado' }[estadoRaw];
+
+  // Entregado es el estado final: solo se muestra, ya no se puede avanzar
+  if (!siguienteEstado) {
+    return `<span style="${style}padding:4px 10px;border-radius:12px;font-size:11px;font-weight:700;text-transform:uppercase;">${pedido}</span>`;
+  }
+
+  return `<button onclick="avanzarPedido(${ordenId}, '${siguienteEstado}')"
+    style="${style}padding:4px 10px;border-radius:12px;font-size:11px;font-weight:700;text-transform:uppercase;border:none;cursor:pointer;"
+    onmouseover="this.style.filter='brightness(1.12)'" onmouseout="this.style.filter=''"
+    title="Clic para avanzar el estado del pedido"
+  >${pedido} →</button>`;
 }
 
 // Acciones de Gestión
@@ -840,6 +852,20 @@ window.rechazarOrden = async function(id) {
     await loadCompras();
   } catch(e) {
     alert('Error al rechazar la orden: ' + e.message);
+  }
+};
+
+window.avanzarPedido = async function(id, nuevoEstado) {
+  const labels = { repartiendo: 'En reparto', entregado: 'Entregado' };
+  if (!confirm(`¿Marcar el pedido #${id} como "${labels[nuevoEstado]}"?`)) return;
+  try {
+    await api(`${API.compras}${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify({ estado: nuevoEstado })
+    });
+    await loadCompras();
+  } catch (e) {
+    alert('Error al actualizar el pedido: ' + e.message);
   }
 };
 
