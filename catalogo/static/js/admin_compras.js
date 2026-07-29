@@ -770,9 +770,12 @@ function renderPedidoBadge(pedido, ordenId, estadoRaw) {
   };
   const style = colors[pedido] || 'background:#718096;color:white;';
 
-  const siguienteEstado = { 'recibido': 'repartiendo', 'repartiendo': 'entregado' }[estadoRaw];
+  const siguienteEstado = {
+    'pagado': 'repartiendo',
+    'recibido': 'repartiendo',
+    'repartiendo': 'entregado'
+  }[estadoRaw];
 
-  // Entregado es el estado final: solo se muestra, ya no se puede avanzar
   if (!siguienteEstado) {
     return `<span style="${style}padding:4px 10px;border-radius:12px;font-size:11px;font-weight:700;text-transform:uppercase;">${pedido}</span>`;
   }
