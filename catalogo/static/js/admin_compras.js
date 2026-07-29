@@ -523,7 +523,7 @@ async function loadPromociones() {
     <article class="card span-12">
       <h3 id="proms-form-title">Nueva promoción</h3>
       <form id="formPromocion">
-        <div class="field"><label>Título</label><input name="titulo" required></div>
+        <div class="field"><label>Nombre</label><input name="nombre" required></div>
         <div class="field">
           <label>Artículo (mezcal)</label>
           <select name="mezcal"><option value="">General (sin artículo específico)</option>${mezcalOpts}</select>
@@ -531,10 +531,16 @@ async function loadPromociones() {
         <div class="field full" id="promMezcalPreview" style="display:none">
           <img id="promMezcalPreviewImg" src="" style="height:70px;border-radius:6px;border:1px solid var(--line);object-fit:cover">
         </div>
-        <div class="field"><label>Porcentaje Descuento (%)</label><input name="descuento_porcentaje" type="number" min="1" max="100" required></div>
+        <div class="field"><label>Tipo de descuento</label>
+          <select name="tipo_descuento">
+            <option value="porcentaje">Porcentaje</option>
+            <option value="monto_fijo">Monto fijo</option>
+          </select>
+        </div>
+        <div class="field"><label>Valor del descuento</label><input name="valor_descuento" type="number" step="0.01" min="0" required></div>
         <div class="field"><label>Fecha Inicio</label><input name="fecha_inicio" type="date" required></div>
         <div class="field"><label>Fecha Fin</label><input name="fecha_fin" type="date" required></div>
-        <div class="field"><label>Activa</label><select name="activa"><option value="true">Sí</option><option value="false">No</option></select></div>
+        <div class="field"><label>Activa</label><select name="activo"><option value="true">Sí</option><option value="false">No</option></select></div>
         <div class="field full"><label>Descripción</label><textarea name="descripcion"></textarea></div>
         <div class="field full actions"><button class="btn primary" type="submit">Guardar</button></div>
       </form>
@@ -545,7 +551,6 @@ async function loadPromociones() {
     </article>
   `;
 
-  // Preview de imagen al elegir un mezcal
   const selMezcal = document.querySelector('#formPromocion [name=mezcal]');
   const previewBox = document.getElementById('promMezcalPreview');
   const previewImg = document.getElementById('promMezcalPreviewImg');
@@ -560,17 +565,18 @@ async function loadPromociones() {
   });
 
   _SR['st-proms'] = () => {
-    const f=ST.filter('st-proms',state.promociones,['titulo','descripcion','mezcal_nombre'],['activa']);
+    const f=ST.filter('st-proms',state.promociones,['nombre','descripcion','mezcal_nombre'],['activo']);
     const pg=ST.page('st-proms',f);
     document.getElementById('st-proms-wrap').innerHTML = ST.wrap('st-proms',pg,
-      ['ID','Título','Artículo','Descuento','Inicio','Fin','Activa','Acciones'],
+      ['ID','Nombre','Artículo','Descuento','Inicio','Fin','Activa','Acciones'],
       pg.rows.map(p=>[
-        p.id, p.titulo, p.mezcal_nombre || 'General', `${p.descuento_porcentaje}%`,
+        p.id, p.nombre, p.mezcal_nombre || 'General',
+        p.tipo_descuento === 'porcentaje' ? `${p.valor_descuento}%` : `$${p.valor_descuento}`,
         p.fecha_inicio, p.fecha_fin,
-        activoBadge(p.activa,'proms',p.id,'activa'),
-        actBtns('proms',p.id,p.titulo)
+        activoBadge(p.activo,'proms',p.id,'activo'),
+        actBtns('proms',p.id,p.nombre)
       ]),
-      [{k:'activa',lbl:'Estado',opts:[{v:'true',l:'Activas'},{v:'false',l:'Inactivas'}]}]
+      [{k:'activo',lbl:'Estado',opts:[{v:'true',l:'Activas'},{v:'false',l:'Inactivas'}]}]
     );
   };
   _SR['st-proms']();
@@ -578,9 +584,11 @@ async function loadPromociones() {
   _CRUD_EDIT['proms']=id=>{
     const p=state.promociones.find(x=>x.id===id);if(!p)return;
     const fm=document.getElementById('formPromocion');
-    fm.titulo.value=p.titulo; fm.descuento_porcentaje.value=p.descuento_porcentaje;
+    fm.nombre.value=p.nombre;
+    fm.tipo_descuento.value=p.tipo_descuento;
+    fm.valor_descuento.value=p.valor_descuento;
     fm.fecha_inicio.value=p.fecha_inicio; fm.fecha_fin.value=p.fecha_fin;
-    fm.activa.value=String(p.activa); fm.descripcion.value=p.descripcion||'';
+    fm.activo.value=String(p.activo); fm.descripcion.value=p.descripcion||'';
     fm.mezcal.value = p.mezcal || '';
     fm.mezcal.dispatchEvent(new Event('change'));
     _EDIT.proms=id;_eMode('formPromocion','proms-form-title','proms');
@@ -594,11 +602,12 @@ async function loadPromociones() {
   document.getElementById('formPromocion').onsubmit = async (e) => {
     e.preventDefault();
     const data = {
-      titulo: e.target.titulo.value,
-      descuento_porcentaje: e.target.descuento_porcentaje.value,
+      nombre: e.target.nombre.value,
+      tipo_descuento: e.target.tipo_descuento.value,
+      valor_descuento: e.target.valor_descuento.value,
       fecha_inicio: e.target.fecha_inicio.value,
       fecha_fin: e.target.fecha_fin.value,
-      activa: e.target.activa.value === 'true',
+      activo: e.target.activo.value === 'true',
       descripcion: e.target.descripcion.value,
       mezcal: e.target.mezcal.value || null
     };
