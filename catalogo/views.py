@@ -236,6 +236,11 @@ class OrdenViewSet(viewsets.ModelViewSet):
         if orden.estado == 'cancelado':
             return Response({'error': 'La orden fue cancelada previamente.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Efectivo: se queda pendiente hasta que el administrador la apruebe manualmente
+        if orden.metodo_pago == 'efectivo':
+            return Response(self.get_serializer(orden).data, status=status.HTTP_200_OK)
+
+        # Tarjeta: se confirma automáticamente al momento del pago
         with transaction.atomic():
             for item in orden.items.all():
                 if item.cantidad > item.mezcal.stock:
