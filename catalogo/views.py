@@ -379,14 +379,14 @@ class ReporteVentasViewSet(viewsets.ViewSet):
     permission_classes = [EsAdministrador]
 
     def list(self, request):
-        ordenes = Orden.objects.filter(estado__in=['pagado', 'entregado', 'recibido'])
+        ordenes = Orden.objects.filter(estado__in=['pagado', 'entregado', 'recibido', 'repartiendo'])
         total_ventas = ordenes.aggregate(total=Sum("total"))["total"] or 0
         total_ordenes = ordenes.count()
         ticket = (total_ventas / total_ordenes) if total_ordenes else 0
 
         top = (
             OrdenItem.objects
-            .filter(orden__estado__in=['pagado', 'entregado', 'recibido'])
+            .filter(orden__estado__in=['pagado', 'entregado', 'recibido', 'repartiendo'])
             .values("mezcal__nombre")
             .annotate(cantidad=Sum("cantidad"))
             .order_by("-cantidad")[:10]
